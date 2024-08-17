@@ -3,13 +3,9 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize, LinearConstraint, Bounds
 from functools import partial
 
-# Define the exp function
 def exp_function(x):
     return -np.exp(-0.4*x) + 1
 
-# Derivative of the exp function
-def exp_derivative_function(x):
-    return -0.4*np.exp(-0.4*x)  
 
 def line(x):
     return 1.0*np.ones(x.shape[0])
