@@ -284,9 +284,9 @@ plt.plot(t, s2, 'g-', label='Player 2 s')
 plt.plot(t, s1_dot, 'r:', label='Player 1 s_dot')
 plt.plot(t, s2_dot, 'g:', label='Player 2 s_dot')
 
-plt.xlabel('x')
-plt.ylabel('f(x)')
-plt.title('Quadratic Curve with Horizontal Tangent Line')
+plt.xlabel('t')
+plt.ylabel('s/s_dot')
+plt.title('Logitudinal info')
 plt.legend()
 plt.axis('equal')
 # Show the plot
