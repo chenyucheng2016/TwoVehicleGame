@@ -190,8 +190,8 @@ y_line = line(x_line)
 exp_accum_s = cur_accum_s(x_exp, y_exp)
 line_accum_s = cur_accum_s(x_line, y_line)
 
-exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 3)
-exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 3)
+exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 4)
+exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 4)
 
 line_s2x_param = np.polyfit(line_accum_s, x_line, 1)
 line_s2y_param = np.polyfit(line_accum_s, y_line, 1)
@@ -245,11 +245,7 @@ callback_with_params = partial(callback, fitted_lane_funcs=fitted_lane_funcs, tr
 result = minimize(objective, s0, args=(fitted_lane_funcs, track_vel_param, objective_weight), 
                   method='SLSQP', constraints=linear_constraints, bounds=bounds, 
                   callback=callback_with_params,
-                  options={
-                            'disp': True,        # Display output during optimization
-                            'maxiter': 2000,      # Maximum number of iterations
-                            'ftol': 1e-1          # General tolerance for convergence
-                        })
+                  options={'disp': True,'maxiter': 2000,'ftol': 0.1})
 
 if result.success:
     print("Optimization was successful!")
