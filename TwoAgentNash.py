@@ -300,8 +300,8 @@ if __name__=="__main__":
     xdata1, ydata1 = [], []
     xdata2, ydata2 = [], []
 
-    car1, = plt.plot([], [], 'ro', animated=True)  # Car 1 as a red dot
-    car2, = plt.plot([], [], 'bo', animated=True)  # Car 2 as a blue dot
+    car1, = plt.plot([], [], 'ro', animated=True)
+    car2, = plt.plot([], [], 'bo', animated=True)
 
     ax.set_xlim(-5, 13)
     ax.set_ylim(-5, 5)
