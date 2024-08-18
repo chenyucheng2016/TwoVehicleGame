@@ -1,11 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from scipy.optimize import minimize, LinearConstraint, Bounds
 from functools import partial
 
+
+#reference line info
 def exp_function(x):
     return -np.exp(-0.4*x) + 1
-
 
 def line(x):
     return 1.0*np.ones(x.shape[0])
@@ -20,6 +22,7 @@ def cur_accum_s(x, y):
             accum_s.append(s)
     return np.array(accum_s)
 
+#optimization setup
 def collision_avoidance_objective(s1, s2, fitted_lane_funcs):
     x1 = fitted_lane_funcs["s2x_exp"](s1)
     y1 = fitted_lane_funcs["s2y_exp"](s1)
@@ -33,7 +36,6 @@ def collision_avoidance_objective(s1, s2, fitted_lane_funcs):
 def track_speed_objective(s1_dot, s2_dot, track_vel_param):
     return (track_vel_param["v1_weight"]*(s1_dot - track_vel_param["v1_ref"])**2 + 
             track_vel_param["v2_weight"]*(s2_dot - track_vel_param["v2_ref"])**2)
-
 
 def objective(s, fitted_lane_funcs, track_vel_param, objective_weight):
     #segment decision variables 
@@ -175,112 +177,165 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
 def callback(xk, fitted_lane_funcs, track_vel_param, objective_weight):
     print(f"Current solution: x = {xk}")
     print(f"Current objective value: f(x) = {objective(xk, fitted_lane_funcs, track_vel_param, objective_weight)}")
-    print("-" * 50)
+    print("-" * 80)
+
+#animation display
+def init():
+    car1.set_data([], [])
+    car2.set_data([], [])
+    return car1, car2
+
+def update(t, s1, s2, s2x_exp, s2y_exp, s2x_line, s2y_line, delta_t, t_max):
+    t_total = np.arange(0, t_max, delta_t)
+    t_index = np.where(t_total == t)
+    s1_t = s1[t_index]
+    s2_t = s2[t_index]
+
+    x1 = s2x_exp(s1_t)
+    y1 = s2y_exp(s1_t)
+
+    x2 = s2x_line(s2_t)
+    y2 = s2y_line(s2_t)
+
+    car1.set_data(x1, y1)
+    car2.set_data(x2, y2)
+    return car1, car2
+
+if __name__=="__main__":
+
+    # Generate x values for plotting
+    x_exp = np.linspace(-3, 12, 400)
+    y_exp = exp_function(x_exp)
+
+    x_line = np.linspace(-5, 12, 400)
+    y_line = line(x_line)
+
+
+    exp_accum_s = cur_accum_s(x_exp, y_exp)
+    line_accum_s = cur_accum_s(x_line, y_line)
+
+    exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 4)
+    exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 4)
+
+    line_s2x_param = np.polyfit(line_accum_s, x_line, 1)
+    line_s2y_param = np.polyfit(line_accum_s, y_line, 1)
+
+    """
+    decision variables:
+    s1,s1',s1'' 0:T
+    s2,s2',s2'' 0:T
+    """
+    s2x_exp =  np.poly1d(exp_s2x_param)
+    s2y_exp =  np.poly1d(exp_s2y_param)
+
+    s2x_line =  np.poly1d(line_s2x_param)
+    s2y_line =  np.poly1d(line_s2y_param)
+
+    fitted_lane_funcs = {
+        "s2x_exp": s2x_exp,
+        "s2y_exp": s2y_exp,
+        "s2x_line": s2x_line,
+        "s2y_line": s2y_line,
+    }
+
+    v1_ref = 2.0
+    v2_ref = 2.0
+
+    track_vel_param = {
+        "v1_ref": v1_ref,
+        "v1_weight": 1.0,
+        "v2_ref": v2_ref,
+        "v2_weight": 1.0,
+        "max_acc": 1.0
+    }
+
+    objective_weight = {
+        "collision_weight":1.0,
+        "track_speed_weight":1.0,
+    }
+
+    #First estimate a long enough time
+    t_max = 20 #sec
+    delta_t = 1.0 #sec
+
+    s0 = construct_init_guess(t_max, delta_t, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
+    A, ug, lg = construct_linear_constraints(s0, delta_t)
+    linear_constraints = LinearConstraint(A, lg, ug)
+    ub, lb = construct_bounds(s0, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
+    bounds = Bounds(lb, ub)
+
+    callback_with_params = partial(callback, fitted_lane_funcs=fitted_lane_funcs, track_vel_param=track_vel_param, objective_weight=objective_weight)
+
+    result = minimize(objective, s0, args=(fitted_lane_funcs, track_vel_param, objective_weight), 
+                      method='SLSQP', constraints=linear_constraints, bounds=bounds, 
+                      callback=callback_with_params,
+                      options={'disp': True,'maxiter': 2000,'ftol': 0.1})
+
+    if result.success:
+        print("Optimization was successful!")
+        print("Optimal Solution:", result.x)
+        print("Function Value at Optimal Solution:", result.fun)
+    else:
+        print("Optimization failed.")
+        print("Reason:", result.message)
+
+    
+    #segment optimal solution
+    var_len = result.x.shape[0]
+    single_agent_var_len = int(var_len / 2)
+    single_order_var_len = int(single_agent_var_len / 3)
+    s1_var = result.x[0:single_agent_var_len]
+    s2_var = result.x[single_agent_var_len:var_len]
+    s1 = s1_var[0:single_order_var_len]
+    s2 = s2_var[0:single_order_var_len]
+    s1_dot = s1_var[single_order_var_len:single_order_var_len*2]
+    s2_dot = s2_var[single_order_var_len:single_order_var_len*2]
+
+    t = np.arange(0, t_max, delta_t)
+
+    
+    #plot animation
+    fig, ax = plt.subplots()
+
+    xdata1, ydata1 = [], []
+    xdata2, ydata2 = [], []
+
+    car1, = plt.plot([], [], 'ro', animated=True)  # Car 1 as a red dot
+    car2, = plt.plot([], [], 'bo', animated=True)  # Car 2 as a blue dot
+
+    ax.set_xlim(-5, 13)
+    ax.set_ylim(-5, 5)
+
+    # Static background: road and buildings
+    road1 = plt.plot(x_exp, y_exp, 'r-', lw=1)
+    road2 = plt.plot(x_line, y_line, 'g-', lw=1)
+
+    
+    update_with_params = partial(update, s1 = s1, s2 = s2, s2x_exp = s2x_exp, s2y_exp = s2y_exp, 
+                                 s2x_line = s2x_line, s2y_line = s2y_line, delta_t = delta_t, t_max = t_max)
+
+    ani = animation.FuncAnimation(fig, update_with_params, frames=t,
+                                  init_func=init, blit=True)
+
+    plt.show()
+
+
+    #display results graph
+    plt.plot(t, s1, 'r-', label='Player 1 s')
+    plt.plot(t, s2, 'g-', label='Player 2 s')
+
+    plt.plot(t, s1_dot, 'r:', label='Player 1 s_dot')
+    plt.plot(t, s2_dot, 'g:', label='Player 2 s_dot')
+
+    plt.xlabel('t')
+    plt.ylabel('s/s_dot')
+    plt.title('Logitudinal info')
+    plt.legend()
+    plt.axis('equal')
+    # Show the plot
+    plt.grid(True)
+    plt.show()
+    
 
 
 
-# Generate x values for plotting
-x_exp = np.linspace(-3, 12, 400)
-y_exp = exp_function(x_exp)
-
-x_line = np.linspace(-5, 12, 400)
-y_line = line(x_line)
-
-
-exp_accum_s = cur_accum_s(x_exp, y_exp)
-line_accum_s = cur_accum_s(x_line, y_line)
-
-exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 4)
-exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 4)
-
-line_s2x_param = np.polyfit(line_accum_s, x_line, 1)
-line_s2y_param = np.polyfit(line_accum_s, y_line, 1)
-
-"""
-decision variables:
-s1,s1',s1'' 0:T
-s2,s2',s2'' 0:T
-"""
-s2x_exp =  np.poly1d(exp_s2x_param)
-s2y_exp =  np.poly1d(exp_s2y_param)
-
-s2x_line =  np.poly1d(line_s2x_param)
-s2y_line =  np.poly1d(line_s2y_param)
-
-fitted_lane_funcs = {
-    "s2x_exp": s2x_exp,
-    "s2y_exp": s2y_exp,
-    "s2x_line": s2x_line,
-    "s2y_line": s2y_line,
-}
-
-v1_ref = 2.0
-v2_ref = 2.0
-
-track_vel_param = {
-    "v1_ref": v1_ref,
-    "v1_weight": 1.0,
-    "v2_ref": v2_ref,
-    "v2_weight": 1.0,
-    "max_acc": 1.0
-}
-
-objective_weight = {
-    "collision_weight":1.0,
-    "track_speed_weight":1.0,
-}
-
-#First estimate a long enough time
-t_max = 20 #sec
-delta_t = 1.0 #sec
-
-s0 = construct_init_guess(t_max, delta_t, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
-A, ug, lg = construct_linear_constraints(s0, delta_t)
-linear_constraints = LinearConstraint(A, lg, ug)
-ub, lb = construct_bounds(s0, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
-bounds = Bounds(lb, ub)
-
-callback_with_params = partial(callback, fitted_lane_funcs=fitted_lane_funcs, track_vel_param=track_vel_param, objective_weight=objective_weight)
-
-result = minimize(objective, s0, args=(fitted_lane_funcs, track_vel_param, objective_weight), 
-                  method='SLSQP', constraints=linear_constraints, bounds=bounds, 
-                  callback=callback_with_params,
-                  options={'disp': True,'maxiter': 2000,'ftol': 0.1})
-
-if result.success:
-    print("Optimization was successful!")
-    print("Optimal Solution:", result.x)
-    print("Function Value at Optimal Solution:", result.fun)
-else:
-    print("Optimization failed.")
-    print("Reason:", result.message)
-
-#display results graph
-#segment optimal solution
-var_len = result.x.shape[0]
-single_agent_var_len = int(var_len / 2)
-single_order_var_len = int(single_agent_var_len / 3)
-s1_var = result.x[0:single_agent_var_len]
-s2_var = result.x[single_agent_var_len:var_len]
-s1 = s1_var[0:single_order_var_len]
-s2 = s2_var[0:single_order_var_len]
-s1_dot = s1_var[single_order_var_len:single_order_var_len*2]
-s2_dot = s2_var[single_order_var_len:single_order_var_len*2]
-
-t = np.arange(0, t_max, delta_t)
-
-
-plt.plot(t, s1, 'r-', label='Player 1 s')
-plt.plot(t, s2, 'g-', label='Player 2 s')
-
-plt.plot(t, s1_dot, 'r:', label='Player 1 s_dot')
-plt.plot(t, s2_dot, 'g:', label='Player 2 s_dot')
-
-plt.xlabel('t')
-plt.ylabel('s/s_dot')
-plt.title('Logitudinal info')
-plt.legend()
-plt.axis('equal')
-# Show the plot
-plt.grid(True)
-plt.show()
