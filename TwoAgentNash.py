@@ -207,7 +207,7 @@ if __name__=="__main__":
     x_exp = np.linspace(-3, 12, 400)
     y_exp = exp_function(x_exp)
 
-    x_line = np.linspace(-5, 12, 400)
+    x_line = np.linspace(-3, 12, 400)
     y_line = line(x_line)
 
 
@@ -269,7 +269,8 @@ if __name__=="__main__":
     result = minimize(objective, s0, args=(fitted_lane_funcs, track_vel_param, objective_weight), 
                       method='SLSQP', constraints=linear_constraints, bounds=bounds, 
                       callback=callback_with_params,
-                      options={'disp': True,'maxiter': 2000,'ftol': 0.1})
+                      options={'disp': True,'maxiter': 2000,'ftol': 0.01})
+    print(result)
 
     if result.success:
         print("Optimization was successful!")
@@ -303,8 +304,8 @@ if __name__=="__main__":
     car1, = plt.plot([], [], 'ro', animated=True)
     car2, = plt.plot([], [], 'bo', animated=True)
 
-    ax.set_xlim(-5, 13)
-    ax.set_ylim(-5, 5)
+    ax.set_xlim(-6, 13)
+    ax.set_ylim(-8, 5)
 
     # Static background: road and buildings
     road1 = plt.plot(x_exp, y_exp, 'r-', lw=1)
