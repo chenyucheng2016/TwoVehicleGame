@@ -1,8 +1,10 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 from scipy.optimize import minimize, LinearConstraint, Bounds
 from functools import partial
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from mpl_toolkits.mplot3d import Axes3D
+
 
 
 #reference line info
@@ -149,13 +151,16 @@ def construct_bounds(s, track_vel_param, s1_max, s2_max):
     return ub, lb
 
 def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
+    #initial guess matters which mode you converge to
+    #if you init s1_max, s2_max / 2, you implicitly say that say that s2 should 
+    #yield to s1
     single_order_var_len = int(t_max / delta_t)
     single_agent_var_len = 3 * single_order_var_len
     var_len = single_agent_var_len * 2
     s0 = np.zeros(var_len)
     for i in range(single_order_var_len):
         #player 1
-        s0[i] = s1_max
+        s0[i] = s1_max / 2
         s0[i + single_order_var_len] = track_vel_param["v1_ref"]
         s0[i + 2 * single_order_var_len] = track_vel_param["max_acc"]
         #player 2
@@ -266,12 +271,35 @@ if __name__=="__main__":
 
     callback_with_params = partial(callback, fitted_lane_funcs=fitted_lane_funcs, track_vel_param=track_vel_param, objective_weight=objective_weight)
 
+    
+    """
+    check shape of the collision avoidance objective
+    collision_avoidance_objective_with_params = partial(collision_avoidance_objective, fitted_lane_funcs=fitted_lane_funcs)
+
+
+    s1_arr = np.linspace(0, exp_accum_s[-1], 200)
+    s2_arr = np.linspace(0, line_accum_s[-1], 200)
+
+    S1, S2 = np.meshgrid(s1_arr, s2_arr)
+
+    Z = collision_avoidance_objective_with_params(S1, S2)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot_surface(S1, S2, Z, cmap='viridis')
+
+    ax.set_xlabel('X axis')
+    ax.set_ylabel('Y axis')
+    ax.set_zlabel('Z axis')
+    plt.title('Surface plot of collision objective')
+
+    plt.show()
+    """
+
     result = minimize(objective, s0, args=(fitted_lane_funcs, track_vel_param, objective_weight), 
                       method='SLSQP', constraints=linear_constraints, bounds=bounds, 
                       callback=callback_with_params,
                       options={'disp': True,'maxiter': 2000,'ftol': 0.01})
-    print(result)
-
     if result.success:
         print("Optimization was successful!")
         print("Optimal Solution:", result.x)
