@@ -1,9 +1,11 @@
 import numpy as np
 from scipy.optimize import minimize, LinearConstraint, Bounds
+from cyipopt import minimize_ipopt
 from functools import partial
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
+import time
 
 
 
@@ -24,6 +26,17 @@ def cur_accum_s(x, y):
             accum_s.append(s)
     return np.array(accum_s)
 
+def poly_derivative(poly_params):
+    poly_order = poly_params.shape[0]
+    max_order = poly_order - 1
+    if max_order == 0:
+        return 0.0
+    grad_vec = np.zeros(max_order)
+    for i in range(max_order):
+        grad_vec[i] = (max_order - i) * poly_params[i]
+    return grad_vec
+
+
 #optimization setup
 def collision_avoidance_objective(s1, s2, fitted_lane_funcs):
     x1 = fitted_lane_funcs["s2x_exp"](s1)
@@ -38,6 +51,28 @@ def collision_avoidance_objective(s1, s2, fitted_lane_funcs):
 def track_speed_objective(s1_dot, s2_dot, track_vel_param):
     return (track_vel_param["v1_weight"]*(s1_dot - track_vel_param["v1_ref"])**2 + 
             track_vel_param["v2_weight"]*(s2_dot - track_vel_param["v2_ref"])**2)
+
+def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
+    var_len = s.shape[0]
+    single_agent_var_len = int(var_len / 2)
+    single_order_var_len = int(single_agent_var_len / 3)
+    s1_var = s[0:single_agent_var_len]
+    s2_var = s[single_agent_var_len:var_len]
+    s1 = s1_var[0:single_order_var_len]
+    s2 = s2_var[0:single_order_var_len]
+    s1_dot = s1_var[single_order_var_len:single_order_var_len*2]
+    s2_dot = s2_var[single_order_var_len:single_order_var_len*2]
+    x1 = fitted_lane_funcs["s2x_exp"](s1)
+    y1 = fitted_lane_funcs["s2y_exp"](s1)
+    x2 = fitted_lane_funcs["s2x_line"](s2)
+    y2 = fitted_lane_funcs["s2y_line"](s2)
+    dist = (x1 - x2)**2 + (y1 - y2)**2
+    collision_avoidance_cost = np.exp(-dist + 15)
+    pass
+
+def hessian(s, fitted_lane_funcs, track_vel_param, objective_weight):
+    pass
+
 
 def objective(s, fitted_lane_funcs, track_vel_param, objective_weight):
     #segment decision variables 
@@ -208,22 +243,25 @@ def update(t, s1, s2, s2x_exp, s2y_exp, s2x_line, s2y_line, delta_t, t_max):
 
 if __name__=="__main__":
 
-    # Generate x values for plotting
-    x_exp = np.linspace(-3, 12, 400)
-    y_exp = exp_function(x_exp)
+    #Factors: s1_max, s2_max, delta_t, v1_weight, v2_weight
+    #how do you compenstate the non-convexity of collision function?
 
-    x_line = np.linspace(-3, 12, 400)
+    # Generate x values for plotting
+    x_exp = np.linspace(-5, 18, 400)
+    y_exp = exp_function(x_exp)
+    x_line = np.linspace(-3, 18, 400)
     y_line = line(x_line)
 
 
     exp_accum_s = cur_accum_s(x_exp, y_exp)
     line_accum_s = cur_accum_s(x_line, y_line)
 
-    exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 4)
-    exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 4)
+    exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 5)
+    exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 5)
 
     line_s2x_param = np.polyfit(line_accum_s, x_line, 1)
     line_s2y_param = np.polyfit(line_accum_s, y_line, 1)
+
 
     """
     decision variables:
@@ -231,16 +269,28 @@ if __name__=="__main__":
     s2,s2',s2'' 0:T
     """
     s2x_exp =  np.poly1d(exp_s2x_param)
+    #eval prime s2x_exp
+    s2x_exp_prime = np.poly1d(poly_derivative(exp_s2x_param))
     s2y_exp =  np.poly1d(exp_s2y_param)
+    s2y_exp_prime = np.poly1d(poly_derivative(exp_s2y_param))
 
     s2x_line =  np.poly1d(line_s2x_param)
+    s2x_line_prime = np.poly1d(poly_derivative(line_s2x_param))
     s2y_line =  np.poly1d(line_s2y_param)
+    s2y_line_prime = np.poly1d(poly_derivative(line_s2y_param))
 
     fitted_lane_funcs = {
         "s2x_exp": s2x_exp,
         "s2y_exp": s2y_exp,
         "s2x_line": s2x_line,
         "s2y_line": s2y_line,
+    }
+
+    fitted_lane_prime = {
+        "s2x_exp": s2x_exp_prime,
+        "s2y_exp": s2y_exp_prime,
+        "s2x_line": s2x_line_prime,
+        "s2y_line": s2y_line_prime,
     }
 
     v1_ref = 2.0
@@ -295,11 +345,12 @@ if __name__=="__main__":
 
     plt.show()
     """
-
+    start_time = time.time()   
     result = minimize(objective, s0, args=(fitted_lane_funcs, track_vel_param, objective_weight), 
                       method='SLSQP', constraints=linear_constraints, bounds=bounds, 
-                      callback=callback_with_params,
+                      #callback=callback_with_params,
                       options={'disp': True,'maxiter': 2000,'ftol': 0.01})
+
     if result.success:
         print("Optimization was successful!")
         print("Optimal Solution:", result.x)
@@ -307,6 +358,8 @@ if __name__=="__main__":
     else:
         print("Optimization failed.")
         print("Reason:", result.message)
+    end_time = time.time()
+    print("Optimization time: ", end_time - start_time)
 
     
     #segment optimal solution
@@ -332,7 +385,7 @@ if __name__=="__main__":
     car1, = plt.plot([], [], 'ro', animated=True)
     car2, = plt.plot([], [], 'bo', animated=True)
 
-    ax.set_xlim(-6, 13)
+    ax.set_xlim(-6, 20)
     ax.set_ylim(-8, 5)
 
     # Static background: road and buildings
