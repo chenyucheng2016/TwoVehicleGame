@@ -66,15 +66,28 @@ def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective
     y1 = fitted_lane_funcs["s2y_exp"](s1)
     x2 = fitted_lane_funcs["s2x_line"](s2)
     y2 = fitted_lane_funcs["s2y_line"](s2)
-    dist = (x1 - x2)**2 + (y1 - y2)**2
+    x1_x2 = x1 - x2
+    y1_y2 = y1 - y2
+    x1_prime = fitted_lane_prime["s2x_exp_prime"](s1)
+    y1_prime = fitted_lane_prime["s2y_exp_prime"](s1)
+    x2_prime = fitted_lane_prime["s2x_line_prime"](s2)
+    y2_prime = fitted_lane_prime["s2y_line_prime"](s2)
+    dist = x1_x2**2 + y1_y2**2
     collision_avoidance_cost = np.exp(-dist + 15)
-    pass
+    dv_ds1 = objective_weight["collision_weight"] * collision_avoidance_cost * (-2 * x1_x2 * x1_prime - 2 * y1_y2 * y1_prime)
+    dv_ds2 = objective_weight["collision_weight"] * collision_avoidance_cost * (2 * x1_x2 * x2_prime + 2 * y1_y2 * y2_prime)
+    dv_dds1 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v1_weight"] * (s1_dot - track_vel_param["v1_ref"])
+    dv_dds2 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v1_weight"] * (s2_dot - track_vel_param["v2_ref"])
+    dv_ddds = np.zeros(single_order_var_len)
+    return np.hstack((dv_ds1,dv_dds1, dv_ddds, dv_ds2, dv_dds2, dv_ddds))
+
+
 
 def hessian(s, fitted_lane_funcs, track_vel_param, objective_weight):
     pass
 
 
-def objective(s, fitted_lane_funcs, track_vel_param, objective_weight):
+def objective(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
     #segment decision variables 
     var_len = s.shape[0]
     single_agent_var_len = int(var_len / 2)
@@ -287,10 +300,10 @@ if __name__=="__main__":
     }
 
     fitted_lane_prime = {
-        "s2x_exp": s2x_exp_prime,
-        "s2y_exp": s2y_exp_prime,
-        "s2x_line": s2x_line_prime,
-        "s2y_line": s2y_line_prime,
+        "s2x_exp_prime": s2x_exp_prime,
+        "s2y_exp_prime": s2y_exp_prime,
+        "s2x_line_prime": s2x_line_prime,
+        "s2y_line_prime": s2y_line_prime,
     }
 
     v1_ref = 2.0
@@ -321,7 +334,7 @@ if __name__=="__main__":
 
     callback_with_params = partial(callback, fitted_lane_funcs=fitted_lane_funcs, track_vel_param=track_vel_param, objective_weight=objective_weight)
 
-    
+   
     """
     check shape of the collision avoidance objective
     collision_avoidance_objective_with_params = partial(collision_avoidance_objective, fitted_lane_funcs=fitted_lane_funcs)
@@ -346,8 +359,9 @@ if __name__=="__main__":
     plt.show()
     """
     start_time = time.time()   
-    result = minimize(objective, s0, args=(fitted_lane_funcs, track_vel_param, objective_weight), 
-                      method='SLSQP', constraints=linear_constraints, bounds=bounds, 
+    result = minimize(objective, s0, args=(fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight), 
+                      method='SLSQP', jac=gradient, 
+                      constraints=linear_constraints, bounds=bounds, 
                       #callback=callback_with_params,
                       options={'disp': True,'maxiter': 2000,'ftol': 0.01})
 
