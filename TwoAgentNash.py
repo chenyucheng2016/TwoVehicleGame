@@ -83,7 +83,7 @@ def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective
 
 
 
-def hessian(s, fitted_lane_funcs, track_vel_param, objective_weight):
+def hessian(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
     pass
 
 
@@ -284,13 +284,19 @@ if __name__=="__main__":
     s2x_exp =  np.poly1d(exp_s2x_param)
     #eval prime s2x_exp
     s2x_exp_prime = np.poly1d(poly_derivative(exp_s2x_param))
+    s2x_exp_dprime = np.poly1d(poly_derivative(poly_derivative(exp_s2x_param)))
+
     s2y_exp =  np.poly1d(exp_s2y_param)
     s2y_exp_prime = np.poly1d(poly_derivative(exp_s2y_param))
+    s2y_exp_dprime = np.poly1d(poly_derivative(poly_derivative(exp_s2y_param)))
 
     s2x_line =  np.poly1d(line_s2x_param)
     s2x_line_prime = np.poly1d(poly_derivative(line_s2x_param))
+    s2x_line_dprime = np.poly1d(poly_derivative(poly_derivative(line_s2x_param)))
+
     s2y_line =  np.poly1d(line_s2y_param)
     s2y_line_prime = np.poly1d(poly_derivative(line_s2y_param))
+    s2y_line_dprime = np.poly1d(poly_derivative(poly_derivative(line_s2y_param)))
 
     fitted_lane_funcs = {
         "s2x_exp": s2x_exp,
@@ -304,6 +310,10 @@ if __name__=="__main__":
         "s2y_exp_prime": s2y_exp_prime,
         "s2x_line_prime": s2x_line_prime,
         "s2y_line_prime": s2y_line_prime,
+        "s2x_exp_dprime": s2x_exp_dprime,
+        "s2y_exp_dprime": s2y_exp_dprime,
+        "s2x_line_dprime": s2x_line_dprime,
+        "s2y_line_dprime": s2y_line_dprime,
     }
 
     v1_ref = 2.0
