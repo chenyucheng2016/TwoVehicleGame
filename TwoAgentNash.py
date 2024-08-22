@@ -52,6 +52,14 @@ def track_speed_objective(s1_dot, s2_dot, track_vel_param):
     return (track_vel_param["v1_weight"]*(s1_dot - track_vel_param["v1_ref"])**2 + 
             track_vel_param["v2_weight"]*(s2_dot - track_vel_param["v2_ref"])**2)
 
+
+def comfort_objective(s1_ddot, s2_ddot):
+    number_points = s1_ddot.shape[0]
+    num_jerk1 = s1_ddot[0:number_points-2] - s1_ddot[1:number_points-1]
+    num_jerk2 = s2_ddot[0:number_points-2] - s2_ddot[1:number_points-1]
+    return np.linalg.norm(num_jerk1) + np.linalg.norm(num_jerk2)
+   
+
 def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
     var_len = s.shape[0]
     single_agent_var_len = int(var_len / 2)
@@ -62,6 +70,8 @@ def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective
     s2 = s2_var[0:single_order_var_len]
     s1_dot = s1_var[single_order_var_len:single_order_var_len*2]
     s2_dot = s2_var[single_order_var_len:single_order_var_len*2]
+    s1_ddot = s1_var[single_order_var_len*2:single_order_var_len*3]
+    s2_ddot = s2_var[single_order_var_len*2:single_order_var_len*3]
     x1 = fitted_lane_funcs["s2x_exp"](s1)
     y1 = fitted_lane_funcs["s2y_exp"](s1)
     x2 = fitted_lane_funcs["s2x_line"](s2)
@@ -78,8 +88,17 @@ def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective
     dv_ds2 = objective_weight["collision_weight"] * collision_avoidance_cost * (2 * x1_x2 * x2_prime + 2 * y1_y2 * y2_prime)
     dv_dds1 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v1_weight"] * (s1_dot - track_vel_param["v1_ref"])
     dv_dds2 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v2_weight"] * (s2_dot - track_vel_param["v2_ref"])
-    dv_ddds = np.zeros(single_order_var_len)
-    return np.hstack((dv_ds1,dv_dds1, dv_ddds, dv_ds2, dv_dds2, dv_ddds))
+    dv_ddds1 = np.zeros(single_order_var_len)
+    dv_ddds2 = np.zeros(single_order_var_len)
+    
+    for i in range(single_order_var_len - 2):
+        if i == 0:
+            dv_ddds1[i] = objective_weight["comfort_weight"] * 2 * (s1_ddot[i] - s1_ddot[i+1])
+            dv_ddds2[i] = objective_weight["comfort_weight"] * 2 * (s2_ddot[i] - s2_ddot[i+1])
+        else:
+            dv_ddds1[i] = objective_weight["comfort_weight"] * 4 * s1_ddot[i] - 2 * s1_ddot[i-1] - 2 * s1_ddot[i+1]
+            dv_ddds2[i] = objective_weight["comfort_weight"] * 4 * s2_ddot[i] - 2 * s2_ddot[i-1] - 2 * s2_ddot[i+1]
+    return np.hstack((dv_ds1,dv_dds1, dv_ddds1, dv_ds2, dv_dds2, dv_ddds2))
 
 
 #---------------Check correctness of this hessian-------------------------#
@@ -150,7 +169,8 @@ def objective(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objectiv
     s2_ddot = s2_var[single_order_var_len*2:single_order_var_len*3]
 
     return (objective_weight["collision_weight"]*np.sum(collision_avoidance_objective(s1, s2, fitted_lane_funcs)) +
-            objective_weight["track_speed_weight"]*np.sum(track_speed_objective(s1_dot, s2_dot, track_vel_param)))
+            objective_weight["track_speed_weight"]*np.sum(track_speed_objective(s1_dot, s2_dot, track_vel_param)) +
+            objective_weight["comfort_weight"]*comfort_objective(s1_ddot, s2_ddot))
 
 def construct_linear_constraints(s, delta_t):
     #segment decision variables
@@ -158,6 +178,7 @@ def construct_linear_constraints(s, delta_t):
     single_agent_var_len = int(var_len / 2)
     single_order_var_len = int(single_agent_var_len / 3)
     num_constraints = 4 * (single_order_var_len - 1)
+    #num_constraints = 6 * (single_order_var_len - 1)
     A = np.zeros((num_constraints, var_len))
     ub = np.zeros(num_constraints)
     lb = np.zeros(num_constraints)
@@ -207,12 +228,24 @@ def construct_linear_constraints(s, delta_t):
         lb[constraint_index] = 0.0
         constraint_index  = constraint_index + 1
 
+    """
     #(s(i+1)'‘ - s(i)'')/delta_t bounded
     #player 1
-    #----------------TODO----------------------------#
+    for i in range(single_order_var_len - 1):
+        A[constraint_index][i + 2 * single_order_var_len] = -1.0 / delta_t
+        A[constraint_index][i + 1 + 2 * single_order_var_len] = 1.0 / delta_t
+        ub[constraint_index] = 2
+        lb[constraint_index] = -2
+        constraint_index  = constraint_index + 1
     #player 2
-    #----------------TODO----------------------------#
-
+    for i in range(single_order_var_len - 1):
+        A[constraint_index][i + 2 * single_order_var_len + single_agent_var_len] = -1.0 / delta_t
+        A[constraint_index][i + 1 + 2 * single_order_var_len + single_agent_var_len] = 1.0 / delta_t
+        ub[constraint_index] = 4
+        lb[constraint_index] = -4
+        constraint_index  = constraint_index + 1
+    
+    """
     return A, ub, lb
 
 """
@@ -273,11 +306,11 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
     s0 = np.zeros(var_len)
     for i in range(single_order_var_len):
         #player 1
-        s0[i] = s1_max / 2
+        s0[i] = s1_max
         s0[i + single_order_var_len] = track_vel_param["v1_ref"]
         s0[i + 2 * single_order_var_len] = track_vel_param["max_acc"]
         #player 2
-        s0[i + single_agent_var_len] = s2_max
+        s0[i + single_agent_var_len] = s2_max / 2
         s0[i + single_order_var_len + single_agent_var_len] = track_vel_param["v2_ref"]
         s0[i + 2 * single_order_var_len + single_agent_var_len] = track_vel_param["max_acc"]
      #s
@@ -325,7 +358,7 @@ if __name__=="__main__":
     #how do you compenstate the non-convexity of collision function?
 
     # Generate x values for plotting
-    x_exp = np.linspace(-2, 18, 400)
+    x_exp = np.linspace(-5, 18, 400)
     y_exp = exp_function(x_exp)
     x_line = np.linspace(-3, 18, 400)
     y_line = line(x_line)
@@ -395,6 +428,7 @@ if __name__=="__main__":
     objective_weight = {
         "collision_weight":1.0,
         "track_speed_weight":1.0,
+        "comfort_weight":10.0
     }
 
     #First estimate a long enough time
