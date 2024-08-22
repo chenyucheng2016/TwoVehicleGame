@@ -186,6 +186,7 @@ def construct_linear_constraints(s, delta_t):
         ub[constraint_index] = 0.0
         lb[constraint_index] = 0.0
         constraint_index = constraint_index + 1
+
     # s(i+1)' - s(i)' - 0.5 * delta_t * s(i)'' - 0.5 * delta_t * s(i+1)'' = 0
     # player 1
     for i in range(single_order_var_len - 1):
@@ -205,6 +206,12 @@ def construct_linear_constraints(s, delta_t):
         ub[constraint_index] = 0.0
         lb[constraint_index] = 0.0
         constraint_index  = constraint_index + 1
+
+    #(s(i+1)'‘ - s(i)'')/delta_t bounded
+    #player 1
+    #----------------TODO----------------------------#
+    #player 2
+    #----------------TODO----------------------------#
 
     return A, ub, lb
 
@@ -318,7 +325,7 @@ if __name__=="__main__":
     #how do you compenstate the non-convexity of collision function?
 
     # Generate x values for plotting
-    x_exp = np.linspace(-5, 18, 400)
+    x_exp = np.linspace(-2, 18, 400)
     y_exp = exp_function(x_exp)
     x_line = np.linspace(-3, 18, 400)
     y_line = line(x_line)
@@ -473,6 +480,8 @@ if __name__=="__main__":
     print("IPOPT processing time: ", end_time_ipopt - start_time_ipopt)
     """
     
+
+
     #segment optimal solution
     var_len = result.x.shape[0]
     single_agent_var_len = int(var_len / 2)
