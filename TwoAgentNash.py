@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.optimize import minimize, LinearConstraint, Bounds
-from cyipopt import minimize_ipopt
+#from cyipopt import minimize_ipopt
 from functools import partial
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -77,14 +77,62 @@ def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective
     dv_ds1 = objective_weight["collision_weight"] * collision_avoidance_cost * (-2 * x1_x2 * x1_prime - 2 * y1_y2 * y1_prime)
     dv_ds2 = objective_weight["collision_weight"] * collision_avoidance_cost * (2 * x1_x2 * x2_prime + 2 * y1_y2 * y2_prime)
     dv_dds1 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v1_weight"] * (s1_dot - track_vel_param["v1_ref"])
-    dv_dds2 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v1_weight"] * (s2_dot - track_vel_param["v2_ref"])
+    dv_dds2 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v2_weight"] * (s2_dot - track_vel_param["v2_ref"])
     dv_ddds = np.zeros(single_order_var_len)
     return np.hstack((dv_ds1,dv_dds1, dv_ddds, dv_ds2, dv_dds2, dv_ddds))
 
 
-
+#---------------Check correctness of this hessian-------------------------#
 def hessian(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
-    pass
+    var_len = s.shape[0]
+    single_agent_var_len = int(var_len / 2)
+    single_order_var_len = int(single_agent_var_len / 3)
+    s1_var = s[0:single_agent_var_len]
+    s2_var = s[single_agent_var_len:var_len]
+    s1 = s1_var[0:single_order_var_len]
+    s2 = s2_var[0:single_order_var_len]
+    s1_dot = s1_var[single_order_var_len:single_order_var_len*2]
+    s2_dot = s2_var[single_order_var_len:single_order_var_len*2]
+    x1 = fitted_lane_funcs["s2x_exp"](s1)
+    y1 = fitted_lane_funcs["s2y_exp"](s1)
+    x2 = fitted_lane_funcs["s2x_line"](s2)
+    y2 = fitted_lane_funcs["s2y_line"](s2)
+    x1_x2 = x1 - x2
+    y1_y2 = y1 - y2
+    x1_prime = fitted_lane_prime["s2x_exp_prime"](s1)
+    y1_prime = fitted_lane_prime["s2y_exp_prime"](s1)
+    x2_prime = fitted_lane_prime["s2x_line_prime"](s2)
+    y2_prime = fitted_lane_prime["s2y_line_prime"](s2)
+
+    x1_dprime = fitted_lane_prime["s2x_exp_dprime"](s1)
+    y1_dprime = fitted_lane_prime["s2y_exp_dprime"](s1)
+    x2_dprime = fitted_lane_prime["s2x_line_dprime"](s2)
+    y2_dprime = fitted_lane_prime["s2y_line_dprime"](s2)
+
+    dist = x1_x2**2 + y1_y2**2
+    collision_avoidance_cost = np.exp(-dist + 15)
+    #first order
+    #dv_ds1 = objective_weight["collision_weight"] * collision_avoidance_cost * (-2 * x1_x2 * x1_prime - 2 * y1_y2 * y1_prime)
+    #dv_ds2 = objective_weight["collision_weight"] * collision_avoidance_cost * (2 * x1_x2 * x2_prime + 2 * y1_y2 * y2_prime)
+    #second order
+    dv_2_ds1_2 = -2 * objective_weight["collision_weight"] * collision_avoidance_cost * ((-2 * x1_x2**2 * x1_prime**2 - 
+                  2 * y1_y2**2 * y1_prime**2 - 2 * x1_x2 * y1_y2 * x1_prime * y1_prime) + x1_x2 * x1_dprime + y1_y2 * y1_dprime)
+    dv_2_ds2_2 =  2 * objective_weight["collision_weight"] * collision_avoidance_cost * ((-2 * x1_x2**2 * x2_prime**2 - 
+                  2 * y1_y2**2 * y2_prime**2 - 2 * x1_x2 * y1_y2 * x2_prime * y2_prime) + x1_x2 * x2_dprime + y1_y2 * y2_dprime)
+    dv_2_ds1s2 = 2 * collision_avoidance_cost * (-2 * x1_x2 * x1_prime * x2_prime - 2 * y1_y2 * y1_prime * y2_prime)
+    dv_dds1 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v1_weight"]
+    dv_dds2 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v2_weight"]
+
+    hessian_mat = np.zeros((var_len,var_len))
+    #fill in six blocks
+    for ii in range(single_order_var_len):
+        hessian_mat[ii,ii] = dv_2_ds1_2[ii]
+        hessian_mat[single_order_var_len + ii, single_order_var_len + ii] = dv_dds1
+        hessian_mat[single_agent_var_len + ii, single_agent_var_len + ii] = dv_2_ds2_2[ii]
+        hessian_mat[single_agent_var_len + single_order_var_len + ii, single_agent_var_len + single_order_var_len + ii] = dv_dds2
+        hessian_mat[ii, single_agent_var_len + ii] = dv_2_ds1s2[ii]
+        hessian_mat[single_agent_var_len + ii, ii] = dv_2_ds1s2[ii]
+    return hessian_mat
 
 
 def objective(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
@@ -160,6 +208,16 @@ def construct_linear_constraints(s, delta_t):
 
     return A, ub, lb
 
+"""
+def constraints_ipopt(s, A):
+    return A.dot(s)
+
+def constraints_ipopt_jac(s, A):
+    return A
+def constraints_ipopt_hess(s, A):
+    var_len = s.shape[0]
+    return np.zeros((var_len,var_len))
+"""
 
 def construct_bounds(s, track_vel_param, s1_max, s2_max):
     var_len = s.shape[0]
@@ -370,10 +428,12 @@ if __name__=="__main__":
     """
     start_time = time.time()   
     result = minimize(objective, s0, args=(fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight), 
-                      method='SLSQP', jac=gradient, 
+                      method='SLSQP', 
+                      jac=gradient,
                       constraints=linear_constraints, bounds=bounds, 
                       #callback=callback_with_params,
-                      options={'disp': True,'maxiter': 2000,'ftol': 0.01})
+                      options={'disp': True,'maxiter': 2000,'ftol': 0.01}
+                      )
 
     if result.success:
         print("Optimization was successful!")
@@ -385,6 +445,33 @@ if __name__=="__main__":
     end_time = time.time()
     print("Optimization time: ", end_time - start_time)
 
+    
+    """
+    objective_params = partial(objective, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
+    jac_params = partial(gradient, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
+    hess_params = partial(hessian, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
+
+    constraints_ipopt_params = partial(constraints_ipopt, A = A)
+    constraints_ipopt_jac_params = partial(constraints_ipopt_jac, A = A)
+    constraints_ipopt_hess_params = partial(constraints_ipopt_hess, A = A)
+
+    constr = {'type': 'eq', 'fun':  constraints_ipopt_params, 'jac': constraints_ipopt_jac_params}#, 'hess': constraints_ipopt_hess_params}
+
+    start_time_ipopt = time.time()  
+    result = minimize_ipopt(
+                fun=objective_params,
+                x0=s0,
+                jac=jac_params,
+                #hess=hess_params,
+                bounds=bounds,
+                constraints=constr,
+                options={'disp': 0}
+                )
+    end_time_ipopt = time.time()
+    print("Optimal solution:", result.x)
+    print("Optimal value:", result.fun)
+    print("IPOPT processing time: ", end_time_ipopt - start_time_ipopt)
+    """
     
     #segment optimal solution
     var_len = result.x.shape[0]
