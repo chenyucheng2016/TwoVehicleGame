@@ -58,6 +58,9 @@ def comfort_objective(s1_ddot, s2_ddot):
     num_jerk1 = s1_ddot[0:number_points-2] - s1_ddot[1:number_points-1]
     num_jerk2 = s2_ddot[0:number_points-2] - s2_ddot[1:number_points-1]
     return np.linalg.norm(num_jerk1) + np.linalg.norm(num_jerk2)
+
+def progress_objective(s1, s2):
+    return -(s1[-1]**2 + s2[-1]**2)
    
 
 def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
@@ -85,7 +88,11 @@ def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective
     dist = x1_x2**2 + y1_y2**2
     collision_avoidance_cost = np.exp(-dist + 15)
     dv_ds1 = objective_weight["collision_weight"] * collision_avoidance_cost * (-2 * x1_x2 * x1_prime - 2 * y1_y2 * y1_prime)
+    dv_ds1[-1] = dv_ds1[-1] - 2 * objective_weight["progress_weight"] * s1[-1]
+
     dv_ds2 = objective_weight["collision_weight"] * collision_avoidance_cost * (2 * x1_x2 * x2_prime + 2 * y1_y2 * y2_prime)
+    dv_ds2[-1] = dv_ds2[-1] - 2 * objective_weight["progress_weight"] * s2[-1]
+
     dv_dds1 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v1_weight"] * (s1_dot - track_vel_param["v1_ref"])
     dv_dds2 = 2 * objective_weight["track_speed_weight"] * track_vel_param["v2_weight"] * (s2_dot - track_vel_param["v2_ref"])
     dv_ddds1 = np.zeros(single_order_var_len)
@@ -170,7 +177,8 @@ def objective(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objectiv
 
     return (objective_weight["collision_weight"]*np.sum(collision_avoidance_objective(s1, s2, fitted_lane_funcs)) +
             objective_weight["track_speed_weight"]*np.sum(track_speed_objective(s1_dot, s2_dot, track_vel_param)) +
-            objective_weight["comfort_weight"]*comfort_objective(s1_ddot, s2_ddot))
+            objective_weight["comfort_weight"]*comfort_objective(s1_ddot, s2_ddot) +
+            objective_weight["progress_weight"]*progress_objective(s1, s2))
 
 def construct_linear_constraints(s, delta_t):
     #segment decision variables
@@ -310,7 +318,7 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
         s0[i + single_order_var_len] = track_vel_param["v1_ref"]
         s0[i + 2 * single_order_var_len] = track_vel_param["max_acc"]
         #player 2
-        s0[i + single_agent_var_len] = s2_max / 2
+        s0[i + single_agent_var_len] = s2_max / 5
         s0[i + single_order_var_len + single_agent_var_len] = track_vel_param["v2_ref"]
         s0[i + 2 * single_order_var_len + single_agent_var_len] = track_vel_param["max_acc"]
      #s
@@ -358,17 +366,17 @@ if __name__=="__main__":
     #how do you compenstate the non-convexity of collision function?
 
     # Generate x values for plotting
-    x_exp = np.linspace(-5, 18, 400)
+    x_exp = np.linspace(-1.5, 25, 400)
     y_exp = exp_function(x_exp)
-    x_line = np.linspace(-3, 18, 400)
+    x_line = np.linspace(-3, 25, 400)
     y_line = line(x_line)
 
 
     exp_accum_s = cur_accum_s(x_exp, y_exp)
     line_accum_s = cur_accum_s(x_line, y_line)
 
-    exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 5)
-    exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 5)
+    exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 6)
+    exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 6)
 
     line_s2x_param = np.polyfit(line_accum_s, x_line, 1)
     line_s2y_param = np.polyfit(line_accum_s, y_line, 1)
@@ -428,7 +436,8 @@ if __name__=="__main__":
     objective_weight = {
         "collision_weight":1.0,
         "track_speed_weight":1.0,
-        "comfort_weight":10.0
+        "comfort_weight":10.0,
+        "progress_weight":0.1,
     }
 
     #First estimate a long enough time
