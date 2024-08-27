@@ -13,6 +13,9 @@ import time
 def exp_function(x):
     return -np.exp(-0.4*x) + 1
 
+def qudratic_function(x):
+    return -0.5*x**2 + 8
+
 def line(x):
     return 1.0*np.ones(x.shape[0])
 
@@ -318,7 +321,7 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
         s0[i + single_order_var_len] = track_vel_param["v1_ref"]
         s0[i + 2 * single_order_var_len] = track_vel_param["max_acc"]
         #player 2
-        s0[i + single_agent_var_len] = s2_max / 5
+        s0[i + single_agent_var_len] = s2_max / 2
         s0[i + single_order_var_len + single_agent_var_len] = track_vel_param["v2_ref"]
         s0[i + 2 * single_order_var_len + single_agent_var_len] = track_vel_param["max_acc"]
      #s
@@ -366,10 +369,12 @@ if __name__=="__main__":
     #how do you compenstate the non-convexity of collision function?
 
     # Generate x values for plotting
-    x_exp = np.linspace(-1.5, 25, 400)
+    x_exp = np.linspace(-5, 15, 400)
     y_exp = exp_function(x_exp)
-    x_line = np.linspace(-3, 25, 400)
-    y_line = line(x_line)
+    x_line = np.linspace(0,6,400)
+    y_line = qudratic_function(x_line)
+    #x_line = np.linspace(-3, 25, 400)
+    #y_line = line(x_line)
 
 
     exp_accum_s = cur_accum_s(x_exp, y_exp)
@@ -378,8 +383,8 @@ if __name__=="__main__":
     exp_s2x_param = np.polyfit(exp_accum_s, x_exp, 6)
     exp_s2y_param = np.polyfit(exp_accum_s, y_exp, 6)
 
-    line_s2x_param = np.polyfit(line_accum_s, x_line, 1)
-    line_s2y_param = np.polyfit(line_accum_s, y_line, 1)
+    line_s2x_param = np.polyfit(line_accum_s, x_line, 6)
+    line_s2y_param = np.polyfit(line_accum_s, y_line, 6)
 
 
     """
@@ -454,7 +459,7 @@ if __name__=="__main__":
 
    
     """
-    check shape of the collision avoidance objective
+    #check shape of the collision avoidance objective
     collision_avoidance_objective_with_params = partial(collision_avoidance_objective, fitted_lane_funcs=fitted_lane_funcs)
 
 
@@ -548,8 +553,8 @@ if __name__=="__main__":
     car1, = plt.plot([], [], 'ro', animated=True)
     car2, = plt.plot([], [], 'bo', animated=True)
 
-    ax.set_xlim(-6, 20)
-    ax.set_ylim(-8, 5)
+    ax.set_xlim(-5, 10)
+    ax.set_ylim(-10, 9)
 
     # Static background: road and buildings
     road1 = plt.plot(x_exp, y_exp, 'r-', lw=1)
@@ -561,6 +566,8 @@ if __name__=="__main__":
 
     ani = animation.FuncAnimation(fig, update_with_params, frames=t,
                                   init_func=init, blit=True)
+
+    ani.save(filename="Documents/GitHub/TwoVehicleGame/unload_long.mp4", writer="ffmpeg")
 
     plt.show()
 
