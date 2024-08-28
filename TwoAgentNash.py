@@ -9,7 +9,6 @@ import time
 import math
 import random
 
-
 ##########################################################################
 #MCTS
 ##########################################################################
@@ -22,7 +21,8 @@ class Node:
         self.value = 0.0
 
     def is_fully_expanded(self):
-        return len(self.children) == len(self.state.get_legal_actions())
+        actions = self.state.get_legal_actions()
+        return len(self.children) == (len(actions["p1"]) + len(actions["p2"]))
 
     def best_child(self, c_param=1.4):
         choices_weights = [
@@ -31,6 +31,8 @@ class Node:
         ]
         return self.children[choices_weights.index(max(choices_weights))]
 
+
+    #-----------------------------------------TODO-------------------------------------#
     def expand(self):
         actions = self.state.get_legal_actions()
         for action in actions:
@@ -71,20 +73,39 @@ class MCTS:
                 node = node.best_child()
         return node
 
-    def _simulate(self, state):
-        #-----------TODO---------------#
-        #assuming 
+    def _simulate(self, state, fitted_lane_funcs):
         current_state = state
         while not current_state.is_terminal():
-            action = random.choice(current_state.get_legal_actions())
-            current_state = current_state.move(action)
-        return current_state.get_reward()
+            legal_actions = current_state.get_legal_actions()
+            actions4p1 = legal_actions["p1"]
+            actions4p2 = legal_actions["p2"]
+            p1_accelerated, p2_accelerated = current_state.players_accelerated()
+            if p1_accelerated == False and p2_accelerated == False:
+                actions  = {"p1": random.choice(actions4p1),
+                            "p2": random.choice(actions4p2)
+                            }
+            elif p1_accelerated == False and p2_accelerated == True:
+                actions  = {"p1": random.choice(actions4p1),
+                            "p2": max(actions4p2)
+                            }
+            elif p1_accelerated == True and p2_accelerated == False:
+                actions  = {"p1": max(actions4p2),
+                            "p2": random.choice(actions4p2)
+                            }
+            elif p1_accelerated == True and p2_accelerated == True:
+                actions  = {"p1": max(actions4p1)
+                            "p2": max(actions4p2)}
+            current_state = current_state.move(actions, fitted_lane_funcs)
+        return current_state.get_accumulated_cost()
+
 
 # Two Vehicle lon Game
 class GameState:
-    def __init__(self, s_max, lon_info_init, delta_t = 0.1):
-        self.s1_max = s_max["p1"]
-        self.s2_max = s_max["p2"]
+    def __init__(self, lon_max, lon_info_init, cost, delta_t = 0.1):
+        self.s1_max = lon_max["p1"][0]
+        self.s2_max = lon_max["p2"][0]
+        self.s1_dot_max = lon_max["p1"][1]
+        self.s2_dot_max = lon_max["p2"][1]
         self.s1 = lon_info_init["p1"][0]
         self.s1_dot = lon_info_init["p1"][1]
         self.has_acclerated1 =  lon_info_init["p1"][2]
@@ -92,6 +113,7 @@ class GameState:
         self.s2_dot = lon_info_init["p2"][1]
         self.has_acclerated2 =  lon_info_init["p2"][2]
         self.delta_t = delta_t
+        self.accumulated_cost = 0.0
 
 
     def get_legal_actions(self):
@@ -99,25 +121,13 @@ class GameState:
         # either apply 0 acc or a constant acc at each 
         # time instant
         # each action should be a dictionary
-        if self.has_acclerated1 == False and self.has_acclerated2 == False:
-            actions  = {"p1": [0.0, 0.5],
-                        "p2": [0.0, 0.5]}
-        elif self.has_acclerated1 == False and self.has_acclerated2 == True:
-            actions  = {"p1": [0.0, 0.5],
-                        "p2": [0.0]}
-        elif self.has_acclerated1 == True and self.has_acclerated2 == False:
-            actions  = {"p1": [0.0],
-                        "p2": [0.0,0.5]}
-        elif self.has_acclerated1 == True and self.has_acclerated2 == True:
-            actions  = {"p1": [0.0],
-                        "p2": [0.0]}
-        else:
-            actions  = {"p1": [0.0, 0.5],
-                        "p2": [0.0, 0.5]}
+
+        actions  = {"p1": [0.0, 0.5],
+                    "p2": [0.0, 0.5]}
         return actions
     
     
-    def move(self, action):
+    def move(self, action, fitted_lane_funcs):
         # Return the new state after applying the action
         if self.has_acclerated1 == False and action["p1"] > 0:
             self.has_acclerated1 = True
@@ -125,24 +135,36 @@ class GameState:
             self.has_acclerated2 = True
 
         self.s1_dot = self.s1_dot + self.delta_t *  action["p1"]
+        if (self.s1_dot > self.s1_dot_max):
+            self.s1_dot = self.s1_dot_max
         self.s1 = self.s1 + self.s1_dot * self.delta_t
         self.s2_dot = self.s2_dot + self.delta_t *  action["p2"]
+        if (self.s2_dot > self.s2_dot_max):
+            self.s2_dot = self.s2_dot_max
         self.s2 = self.s2 + self.s2_dot * self.delta_t
+
+        self.accumulated_cost = self.accumulated_cost + collision_avoidance_objective(self.s1, self.s2, fitted_lane_funcs)
 
         lon_info = {"p1": [self.s1, self.s1_dot, self.has_acclerated1],
                     "p2": [self.s2, self.s2_dot, self.has_acclerated2]}
-        s_max = {"p1": self.s1_max,
-                 "p2": self.s2_max}
-        return GameState(s_max, lon_info_init)
+        lon_max = {"p1": [self.s1_max, self.s1_dot_max],
+                   "p2": [self.s2_max, self.s2_dot_max]
+                   }
+
+        return GameState(s_max, lon_info_init, self.accumulated_cost)
     
     def is_terminal(self):
         # Return True if the state is terminal (end of game)
-        if self.s1 >= self.s1_max and self.s2 >= self.s2_max:
+        if self.s1 >= self.s1_max or self.s2 >= self.s2_max:
             return true
 
     #need to import lateral information in here, the polynomial functions
-    def get_reward(self, fitted_lane_funcs):
-        return collision_avoidance_objective(self.s1, self.s2, fitted_lane_funcs)
+    def get_accumulated_cost(self):
+        return self.accumulated_cost
+
+
+    def players_accelerated(self):
+        return [self.has_acclerated1,self.has_acclerated2]
 
 ##########################################################################
 #Numerical Optimization
