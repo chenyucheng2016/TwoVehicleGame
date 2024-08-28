@@ -82,7 +82,6 @@ class MCTS:
 
 # Two Vehicle lon Game
 class GameState:
-#need to import lateral information in here, the polynomial functions
     def __init__(self, s_max, lon_info_init, delta_t = 0.1):
         self.s1_max = s_max["p1"]
         self.s2_max = s_max["p2"]
@@ -141,10 +140,9 @@ class GameState:
         if self.s1 >= self.s1_max and self.s2 >= self.s2_max:
             return true
 
-    
-    def get_reward(self):
-        # Return the reward for the current state (win, lose, draw)
-        pass
+    #need to import lateral information in here, the polynomial functions
+    def get_reward(self, fitted_lane_funcs):
+        return collision_avoidance_objective(self.s1, self.s2, fitted_lane_funcs)
 
 ##########################################################################
 #Numerical Optimization
