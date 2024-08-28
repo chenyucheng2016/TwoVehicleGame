@@ -1,6 +1,7 @@
 import math
 import random
 
+
 class Node:
     def __init__(self, state, parent=None):
         self.state = state

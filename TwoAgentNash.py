@@ -6,9 +6,149 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
 import time
+import math
+import random
 
 
+##########################################################################
+#MCTS
+##########################################################################
+class Node:
+    def __init__(self, state, parent=None):
+        self.state = state
+        self.parent = parent
+        self.children = []
+        self.visits = 0
+        self.value = 0.0
 
+    def is_fully_expanded(self):
+        return len(self.children) == len(self.state.get_legal_actions())
+
+    def best_child(self, c_param=1.4):
+        choices_weights = [
+            (child.value / child.visits) + c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
+            for child in self.children
+        ]
+        return self.children[choices_weights.index(max(choices_weights))]
+
+    def expand(self):
+        actions = self.state.get_legal_actions()
+        for action in actions:
+            if not any(child.state == self.state.move(action) for child in self.children):
+                new_state = self.state.move(action)
+                child_node = Node(new_state, parent=self)
+                self.children.append(child_node)
+                return child_node
+
+    def backpropagate(self, reward):
+        self.visits += 1
+        self.value += reward
+        if self.parent:
+            self.parent.backpropagate(reward)
+
+    def best_action(self):
+        return self.best_child(c_param=0)
+
+class MCTS:
+    def __init__(self, n_simulations=1000):
+        self.n_simulations = n_simulations
+
+    def search(self, initial_state):
+        root = Node(state=initial_state)
+
+        for _ in range(self.n_simulations):
+            node = self._select(root)
+            reward = self._simulate(node.state)
+            node.backpropagate(reward)
+
+        return root.best_action().state
+
+    def _select(self, node):
+        while not node.state.is_terminal():
+            if not node.is_fully_expanded():
+                return node.expand()
+            else:
+                node = node.best_child()
+        return node
+
+    def _simulate(self, state):
+        #-----------TODO---------------#
+        #assuming 
+        current_state = state
+        while not current_state.is_terminal():
+            action = random.choice(current_state.get_legal_actions())
+            current_state = current_state.move(action)
+        return current_state.get_reward()
+
+# Two Vehicle lon Game
+class GameState:
+#need to import lateral information in here, the polynomial functions
+    def __init__(self, s_max, lon_info_init, delta_t = 0.1):
+        self.s1_max = s_max["p1"]
+        self.s2_max = s_max["p2"]
+        self.s1 = lon_info_init["p1"][0]
+        self.s1_dot = lon_info_init["p1"][1]
+        self.has_acclerated1 =  lon_info_init["p1"][2]
+        self.s2 = lon_info_init["p2"][0]
+        self.s2_dot = lon_info_init["p2"][1]
+        self.has_acclerated2 =  lon_info_init["p2"][2]
+        self.delta_t = delta_t
+
+
+    def get_legal_actions(self):
+        # Return actions of two players, for each player 
+        # either apply 0 acc or a constant acc at each 
+        # time instant
+        # each action should be a dictionary
+        if self.has_acclerated1 == False and self.has_acclerated2 == False:
+            actions  = {"p1": [0.0, 0.5],
+                        "p2": [0.0, 0.5]}
+        elif self.has_acclerated1 == False and self.has_acclerated2 == True:
+            actions  = {"p1": [0.0, 0.5],
+                        "p2": [0.0]}
+        elif self.has_acclerated1 == True and self.has_acclerated2 == False:
+            actions  = {"p1": [0.0],
+                        "p2": [0.0,0.5]}
+        elif self.has_acclerated1 == True and self.has_acclerated2 == True:
+            actions  = {"p1": [0.0],
+                        "p2": [0.0]}
+        else:
+            actions  = {"p1": [0.0, 0.5],
+                        "p2": [0.0, 0.5]}
+        return actions
+    
+    
+    def move(self, action):
+        # Return the new state after applying the action
+        if self.has_acclerated1 == False and action["p1"] > 0:
+            self.has_acclerated1 = True
+        if self.has_acclerated2 == False and action["p2"] > 0:
+            self.has_acclerated2 = True
+
+        self.s1_dot = self.s1_dot + self.delta_t *  action["p1"]
+        self.s1 = self.s1 + self.s1_dot * self.delta_t
+        self.s2_dot = self.s2_dot + self.delta_t *  action["p2"]
+        self.s2 = self.s2 + self.s2_dot * self.delta_t
+
+        lon_info = {"p1": [self.s1, self.s1_dot, self.has_acclerated1],
+                    "p2": [self.s2, self.s2_dot, self.has_acclerated2]}
+        s_max = {"p1": self.s1_max,
+                 "p2": self.s2_max}
+        return GameState(s_max, lon_info_init)
+    
+    def is_terminal(self):
+        # Return True if the state is terminal (end of game)
+        if self.s1 >= self.s1_max and self.s2 >= self.s2_max:
+            return true
+
+    
+    def get_reward(self):
+        # Return the reward for the current state (win, lose, draw)
+        pass
+
+##########################################################################
+#Numerical Optimization
+##########################################################################
 #reference line info
 def exp_function(x):
     return -np.exp(-0.4*x) + 1
@@ -365,6 +505,13 @@ def update(t, s1, s2, s2x_exp, s2y_exp, s2x_line, s2y_line, delta_t, t_max):
 
 if __name__=="__main__":
 
+
+
+    initial_state = GameState()
+    mcts = MCTS(n_simulations=1000)
+    best_next_state = mcts.search(initial_state)
+    """
+
     #Factors: s1_max, s2_max, delta_t, v1_weight, v2_weight
     #how do you compenstate the non-convexity of collision function?
 
@@ -387,11 +534,11 @@ if __name__=="__main__":
     line_s2y_param = np.polyfit(line_accum_s, y_line, 6)
 
 
-    """
-    decision variables:
-    s1,s1',s1'' 0:T
-    s2,s2',s2'' 0:T
-    """
+    
+    # decision variables:
+    # s1,s1',s1'' 0:T
+    # s2,s2',s2'' 0:T
+    
     s2x_exp =  np.poly1d(exp_s2x_param)
     #eval prime s2x_exp
     s2x_exp_prime = np.poly1d(poly_derivative(exp_s2x_param))
@@ -458,29 +605,29 @@ if __name__=="__main__":
     callback_with_params = partial(callback, fitted_lane_funcs=fitted_lane_funcs, track_vel_param=track_vel_param, objective_weight=objective_weight)
 
    
-    """
-    #check shape of the collision avoidance objective
-    collision_avoidance_objective_with_params = partial(collision_avoidance_objective, fitted_lane_funcs=fitted_lane_funcs)
+    
+    # #check shape of the collision avoidance objective
+    # collision_avoidance_objective_with_params = partial(collision_avoidance_objective, fitted_lane_funcs=fitted_lane_funcs)
 
 
-    s1_arr = np.linspace(0, exp_accum_s[-1], 200)
-    s2_arr = np.linspace(0, line_accum_s[-1], 200)
+    # s1_arr = np.linspace(0, exp_accum_s[-1], 200)
+    # s2_arr = np.linspace(0, line_accum_s[-1], 200)
 
-    S1, S2 = np.meshgrid(s1_arr, s2_arr)
+    # S1, S2 = np.meshgrid(s1_arr, s2_arr)
 
-    Z = collision_avoidance_objective_with_params(S1, S2)
+    # Z = collision_avoidance_objective_with_params(S1, S2)
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.plot_surface(S1, S2, Z, cmap='viridis')
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+    # ax.plot_surface(S1, S2, Z, cmap='viridis')
 
-    ax.set_xlabel('X axis')
-    ax.set_ylabel('Y axis')
-    ax.set_zlabel('Z axis')
-    plt.title('Surface plot of collision objective')
+    # ax.set_xlabel('X axis')
+    # ax.set_ylabel('Y axis')
+    # ax.set_zlabel('Z axis')
+    # plt.title('Surface plot of collision objective')
 
-    plt.show()
-    """
+    # plt.show()
+    
     start_time = time.time()   
     result = minimize(objective, s0, args=(fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight), 
                       method='SLSQP', 
@@ -501,32 +648,32 @@ if __name__=="__main__":
     print("Optimization time: ", end_time - start_time)
 
     
-    """
-    objective_params = partial(objective, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
-    jac_params = partial(gradient, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
-    hess_params = partial(hessian, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
+    
+    # objective_params = partial(objective, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
+    # jac_params = partial(gradient, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
+    # hess_params = partial(hessian, fitted_lane_funcs = fitted_lane_funcs, fitted_lane_prime=fitted_lane_prime, track_vel_param=track_vel_param, objective_weight=objective_weight)
 
-    constraints_ipopt_params = partial(constraints_ipopt, A = A)
-    constraints_ipopt_jac_params = partial(constraints_ipopt_jac, A = A)
-    constraints_ipopt_hess_params = partial(constraints_ipopt_hess, A = A)
+    # constraints_ipopt_params = partial(constraints_ipopt, A = A)
+    # constraints_ipopt_jac_params = partial(constraints_ipopt_jac, A = A)
+    # constraints_ipopt_hess_params = partial(constraints_ipopt_hess, A = A)
 
-    constr = {'type': 'eq', 'fun':  constraints_ipopt_params, 'jac': constraints_ipopt_jac_params}#, 'hess': constraints_ipopt_hess_params}
+    # constr = {'type': 'eq', 'fun':  constraints_ipopt_params, 'jac': constraints_ipopt_jac_params}#, 'hess': constraints_ipopt_hess_params}
 
-    start_time_ipopt = time.time()  
-    result = minimize_ipopt(
-                fun=objective_params,
-                x0=s0,
-                jac=jac_params,
-                #hess=hess_params,
-                bounds=bounds,
-                constraints=constr,
-                options={'disp': 0}
-                )
-    end_time_ipopt = time.time()
-    print("Optimal solution:", result.x)
-    print("Optimal value:", result.fun)
-    print("IPOPT processing time: ", end_time_ipopt - start_time_ipopt)
-    """
+    # start_time_ipopt = time.time()  
+    # result = minimize_ipopt(
+    #             fun=objective_params,
+    #             x0=s0,
+    #             jac=jac_params,
+    #             #hess=hess_params,
+    #             bounds=bounds,
+    #             constraints=constr,
+    #             options={'disp': 0}
+    #             )
+    # end_time_ipopt = time.time()
+    # print("Optimal solution:", result.x)
+    # print("Optimal value:", result.fun)
+    # print("IPOPT processing time: ", end_time_ipopt - start_time_ipopt)
+    
     
 
 
@@ -587,7 +734,7 @@ if __name__=="__main__":
     # Show the plot
     plt.grid(True)
     plt.show()
-    
+    """
 
 
 
