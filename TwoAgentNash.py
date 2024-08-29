@@ -9,6 +9,7 @@ import time
 import math
 import random
 import copy
+from scipy.interpolate import interp1d
 
 ##########################################################################
 #MCTS
@@ -45,11 +46,6 @@ class Node:
             (-child.value / child.visits) + c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
             for child in self.children
         ]
-        #print(choices_weights)
-        # print("parent: ", self.state.s1, self.state.s1_dot, self.state.s1_ddot, self.state.s2, self.state.s2_dot, self.state.s2_ddot)
-        # for c in self.children:
-        #    print("child: ", c.state.s1, c.state.s1_dot, c.state.s1_ddot, c.state.s2, c.state.s2_dot, c.state.s2_ddot)
-        # print("\n")
         return self.children[choices_weights.index(max(choices_weights))]
 
     def expand(self):
@@ -73,8 +69,6 @@ class Node:
                     self.children.append(child_node)
                     return child_node
 
-
-
     def backpropagate(self, reward):
         self.visits += 1
         self.value += reward
@@ -93,24 +87,26 @@ class MCTS:
 
     def search(self, initial_state):
         root = Node(state=initial_state)
-        ret = {"s1": [],
-               "s1_dot": [],
-               "s2": [],
-               "s2_dot": []}
+        ret = {"delta_t": root.state.delta_t,
+               "s1": [root.state.s1],
+               "s1_dot": [root.state.s1_dot],
+               "s1_ddot": [root.state.s1_ddot],
+               "s2": [root.state.s2],
+               "s2_dot": [root.state.s2_dot],
+               "s2_ddot": [root.state.s2_ddot]}
         
         while not root.state.is_terminal():
             while abs(root.ave_val_change_rate) > 0.05:
                 node = self._select(root)
                 reward = self._simulate(copy.deepcopy(node.state))
                 node.backpropagate(reward)
-                #print("root: s1: ", root.state.s1, "s2", root.state.s2, "ave rate", root.ave_val_change_rate)
             root = root.best_child()
             ret["s1"].append(root.state.s1)
             ret["s2"].append(root.state.s2)
             ret["s1_dot"].append(root.state.s1_dot)
             ret["s2_dot"].append(root.state.s2_dot)
-
-            #print("root: s1: ", root.state.s1, "s2", root.state.s2, "ave rate", root.ave_val_change_rate)
+            ret["s1_ddot"].append(root.state.s1_ddot)
+            ret["s2_ddot"].append(root.state.s2_ddot)
 
 
         return ret
@@ -191,8 +187,6 @@ class GameState:
             self.has_acclerated2 = True
         self.s1_ddot = action["p1"]
         self.s2_ddot = action["p2"]
-        # print("------before update--------")
-        # print("s1: ", self.s1, "s2: ", self.s2, "s1_dot: ", self.s1_dot, "s2_dot: ", self.s2_dot, "s1_ddot: ", action["p1"], "s2_ddot: ", action["p2"])
         new_s1_dot = self.s1_dot + self.delta_t *  action["p1"]
         if (new_s1_dot > self.s1_dot_max):
             new_s1_dot = self.s1_dot_max
@@ -204,8 +198,6 @@ class GameState:
         self.s2 = self.s2 + 0.5 * (new_s2_dot + self.s2_dot) * self.delta_t
         self.s2_dot = new_s2_dot
 
-        # print("------after update--------")
-        # print("s1: ", self.s1, "s2: ", self.s2, "s1_dot: ", self.s1_dot, "s2_dot: ", self.s2_dot)
         track_vel_param = {
             "v1_ref": 2.0,
             "v1_weight": 1.0,
@@ -214,9 +206,6 @@ class GameState:
             "max_acc": 1.0
         }
 
-
-       
-
         lon_info = {"p1": [self.s1, self.s1_dot, self.has_acclerated1],
                     "p2": [self.s2, self.s2_dot, self.has_acclerated2]}
         lon_max = {"p1": [self.s1_max, self.s1_dot_max],
@@ -224,10 +213,6 @@ class GameState:
                    }
         self.accumulated_cost = self.accumulated_cost + collision_avoidance_objective(self.s1, self.s2, self.fitted_lane_funcs) + proregss_objective_bounded(self.s1, self.s2, lon_max)
 
-        
-        # print("cost1: ", collision_avoidance_objective(self.s1, self.s2, self.fitted_lane_funcs))
-        # print("cost2: ", proregss_objective_bounded(self.s1, self.s2, lon_max))
-        # print("total_cost: ",  self.accumulated_cost)
         return GameState(lon_max, lon_info, self.accumulated_cost, self.fitted_lane_funcs)
     
     def is_terminal(self):
@@ -556,11 +541,11 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
     s0 = np.zeros(var_len)
     for i in range(single_order_var_len):
         #player 1
-        s0[i] = s1_max
+        s0[i] = s1_max / 2
         s0[i + single_order_var_len] = track_vel_param["v1_ref"]
         s0[i + 2 * single_order_var_len] = track_vel_param["max_acc"]
         #player 2
-        s0[i + single_agent_var_len] = s2_max / 2
+        s0[i + single_agent_var_len] = s2_max
         s0[i + single_order_var_len + single_agent_var_len] = track_vel_param["v2_ref"]
         s0[i + 2 * single_order_var_len + single_agent_var_len] = track_vel_param["max_acc"]
      #s
@@ -573,9 +558,46 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
     s0[2 * single_order_var_len] = 0.0
     s0[2 * single_order_var_len + single_agent_var_len] = 0.0
 
-def construct_init_guess_via_search(t_max, delta_t, lon_max, lon_info_init):
+    return s0
 
-    pass
+
+def construct_init_guess_via_search(t_max, delta_t, lon_max, lon_info_init, init_ret):
+    coarse_delta_t = init_ret["delta_t"]
+    coarse_t_max = len(init_ret["s1"]) * coarse_delta_t
+    t = np.arange(0, coarse_t_max, coarse_delta_t)
+    print('----------------------')
+    print(t)
+    print(init_ret["s1"])
+    print('----------------------')
+    print(lon_max["p1"][0])
+    print(lon_max["p2"][0])
+
+    t2s1 = interp1d(t, init_ret["s1"], kind='linear', fill_value="extrapolate")
+    t2s1_dot = interp1d(t, init_ret["s1_dot"], kind='linear', fill_value="extrapolate")
+    t2s1_ddot = interp1d(t, init_ret["s1_ddot"], kind='linear', fill_value="extrapolate")
+
+    t2s2 = interp1d(t, init_ret["s2"], kind='linear', fill_value="extrapolate")
+    t2s2_dot = interp1d(t, init_ret["s2_dot"], kind='linear', fill_value="extrapolate")
+    t2s2_ddot = interp1d(t, init_ret["s2_ddot"], kind='linear', fill_value="extrapolate")
+
+    single_order_var_len = int(t_max / delta_t)
+    single_agent_var_len = 3 * single_order_var_len
+    var_len = single_agent_var_len * 2
+
+    s0 = np.zeros(var_len)
+    t_fill = np.linspace(0, t_max, single_order_var_len)
+
+    for i in range(single_order_var_len):
+        s0[i] = min(t2s1(t_fill[i]),lon_max["p1"][0])
+        s0[i + single_order_var_len] = t2s1_dot(t_fill[i])
+
+        s0[i + single_order_var_len * 2] =  0.5#track_vel_param["max_acc"]#t2s1_ddot(t_fill[i])
+
+        s0[i + single_agent_var_len] = min(t2s2(t_fill[i]),lon_max["p2"][0])
+        s0[i + single_order_var_len + single_agent_var_len] = t2s2_dot(t_fill[i])
+        s0[i + 2*single_order_var_len + single_agent_var_len] =  0.5#track_vel_param["max_acc"]#t2s2_ddot(t_fill[i])
+
+    return s0
 
 def callback(xk, fitted_lane_funcs, track_vel_param, objective_weight):
     print(f"Current solution: x = {xk}")
@@ -609,12 +631,12 @@ if __name__=="__main__":
     #how do you compenstate the non-convexity of collision function?
 
     # Generate x values for plotting
-    x_exp = np.linspace(-5, 15, 400)
+    x_exp = np.linspace(-4, 20, 400)
     y_exp = exp_function(x_exp)
-    x_line = np.linspace(0,6,400)
-    y_line = qudratic_function(x_line)
-    #x_line = np.linspace(-3, 25, 400)
-    #y_line = line(x_line)
+    #x_line = np.linspace(0,6,400)
+    #y_line = qudratic_function(x_line)
+    x_line = np.linspace(-3, 20, 400)
+    y_line = line(x_line)
 
 
     exp_accum_s = cur_accum_s(x_exp, y_exp)
@@ -661,17 +683,13 @@ if __name__=="__main__":
     lon_info_init = {"p1": [0.0, 0.0, False],
                      "p2": [0.0, 0.0, False]
                      }
-    print(lon_max)
     initial_state = GameState(lon_max, lon_info_init, 0.0, fitted_lane_funcs)
     mcts = MCTS(n_simulations=100)
     start_time = time.time()
     ret_traj = mcts.search(initial_state)
     end_time = time.time()
     print("Searching time: ", end_time - start_time)
-
-
-
-    """
+    
 
     fitted_lane_prime = {
         "s2x_exp_prime": s2x_exp_prime,
@@ -702,14 +720,20 @@ if __name__=="__main__":
         "progress_weight":0.1,
     }
 
+    coarse_delta_t = ret_traj["delta_t"]
+    coarse_t_max = len(ret_traj["s1"]) * coarse_delta_t
     #First estimate a long enough time
-    t_max = 20 #sec
-    delta_t = 1.0 #sec
+    t_max = coarse_t_max #sec
+    delta_t = 0.5
 
-    s0 = construct_init_guess(t_max, delta_t, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
-    A, ug, lg = construct_linear_constraints(s0, delta_t)
+     #sec
+
+    #s0_search = construct_init_guess(t_max, delta_t, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
+    s0_search = construct_init_guess_via_search(t_max, delta_t, lon_max, lon_info_init, ret_traj)
+    print(s0_search)
+    A, ug, lg = construct_linear_constraints(s0_search, delta_t)
     linear_constraints = LinearConstraint(A, lg, ug)
-    ub, lb = construct_bounds(s0, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
+    ub, lb = construct_bounds(s0_search, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
     bounds = Bounds(lb, ub)
 
     callback_with_params = partial(callback, fitted_lane_funcs=fitted_lane_funcs, track_vel_param=track_vel_param, objective_weight=objective_weight)
@@ -739,7 +763,7 @@ if __name__=="__main__":
     # plt.show()
     
     start_time = time.time()   
-    result = minimize(objective, s0, args=(fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight), 
+    result = minimize(objective, s0_search, args=(fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight), 
                       method='SLSQP', 
                       jac=gradient,
                       constraints=linear_constraints, bounds=bounds, 
@@ -797,13 +821,7 @@ if __name__=="__main__":
     s2 = s2_var[0:single_order_var_len]
     s1_dot = s1_var[single_order_var_len:single_order_var_len*2]
     s2_dot = s2_var[single_order_var_len:single_order_var_len*2]
-    """
-
-    s1 = np.array(ret_traj["s1"])
-    s2 = np.array(ret_traj["s2"])
-
-    t_max = 10 #sec
-    delta_t = 1.0 #sec
+    
 
     t = np.arange(0, t_max, delta_t)
 
@@ -817,8 +835,8 @@ if __name__=="__main__":
     car1, = plt.plot([], [], 'ro', animated=True)
     car2, = plt.plot([], [], 'bo', animated=True)
 
-    ax.set_xlim(-5, 10)
-    ax.set_ylim(-10, 9)
+    ax.set_xlim(-6, 20)
+    ax.set_ylim(-10, 5)
 
     # Static background: road and buildings
     road1 = plt.plot(x_exp, y_exp, 'r-', lw=1)
