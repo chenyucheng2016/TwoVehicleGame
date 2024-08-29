@@ -25,13 +25,31 @@ class Node:
 
     def is_fully_expanded(self):
         actions = self.state.get_legal_actions()
-        return len(self.children) == (len(actions["p1"]) + len(actions["p2"]))
+        return len(self.children) == (len(actions["p1"]) * len(actions["p2"]))
+
+    def state_equal(self,state1,state2):
+        if  (abs(state1.s1 - state2.s1) < 1e-3 and 
+            abs(state1.s2 - state2.s2) < 1e-3 and 
+            abs(state1.s1_dot - state2.s1_dot) < 1e-3 and 
+            abs(state1.s2_dot - state2.s2_dot) < 1e-3 and
+            abs(state1.s1_ddot - state2.s1_ddot) < 1e-3 and 
+            abs(state1.s2_ddot - state2.s2_ddot) < 1e-3):
+            return True
+        else:
+            return False
+
+
 
     def best_child(self, c_param=1.4):
         choices_weights = [
             (-child.value / child.visits) + c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
             for child in self.children
         ]
+        #print(choices_weights)
+        # print("parent: ", self.state.s1, self.state.s1_dot, self.state.s1_ddot, self.state.s2, self.state.s2_dot, self.state.s2_ddot)
+        # for c in self.children:
+        #    print("child: ", c.state.s1, c.state.s1_dot, c.state.s1_ddot, c.state.s2, c.state.s2_dot, c.state.s2_ddot)
+        # print("\n")
         return self.children[choices_weights.index(max(choices_weights))]
 
     def expand(self):
@@ -43,12 +61,19 @@ class Node:
                 actions = {"p1": actionp1,
                            "p2": actionp2}
                 state_copy = copy.deepcopy(self.state)
-                if not any(child.state == state_copy.move(actions) for child in self.children):
-                    state_copy = copy.deepcopy(self.state)
-                    new_state = state_copy.move(actions)
+                new_state = state_copy.move(actions)
+                new_state_exist = False
+                for child in self.children:
+                    if self.state_equal(child.state, new_state):
+                        new_state_exist = True
+                        break
+
+                if new_state_exist == False:
                     child_node = Node(new_state, parent=self)
                     self.children.append(child_node)
                     return child_node
+
+
 
     def backpropagate(self, reward):
         self.visits += 1
@@ -68,21 +93,27 @@ class MCTS:
 
     def search(self, initial_state):
         root = Node(state=initial_state)
-
+        ret = {"s1": [],
+               "s1_dot": [],
+               "s2": [],
+               "s2_dot": []}
         
         while not root.state.is_terminal():
-            #print("before: s1: ", root.state.s1, "s1_dot", root.state.s1_dot)
-
-            while abs(root.ave_val_change_rate) > 0.1:
+            while abs(root.ave_val_change_rate) > 0.05:
                 node = self._select(root)
-                reward = self._simulate(node.state)
+                reward = self._simulate(copy.deepcopy(node.state))
                 node.backpropagate(reward)
+                #print("root: s1: ", root.state.s1, "s2", root.state.s2, "ave rate", root.ave_val_change_rate)
             root = root.best_child()
-            print("s1: ", root.state.s1, "s1_dot", root.state.s1_dot)
-            print("s2: ", root.state.s2, "s1_dot", root.state.s2_dot)
-            #print("\n")
+            ret["s1"].append(root.state.s1)
+            ret["s2"].append(root.state.s2)
+            ret["s1_dot"].append(root.state.s1_dot)
+            ret["s2_dot"].append(root.state.s2_dot)
 
-        return root.state
+            #print("root: s1: ", root.state.s1, "s2", root.state.s2, "ave rate", root.ave_val_change_rate)
+
+
+        return ret
 
     def _select(self, node):
         while not node.state.is_terminal():
@@ -114,12 +145,14 @@ class GameState:
         self.s2_dot_max = lon_max["p2"][1] #max s2_dot
         self.s1 = lon_info_init["p1"][0] #cur s1
         self.s1_dot = lon_info_init["p1"][1] #cur s1_dot
+        self.s1_ddot = 0.0
         self.has_acclerated1 =  lon_info_init["p1"][2] #has p1 accelerated
         self.s2 = lon_info_init["p2"][0] #cur s2
         self.s2_dot = lon_info_init["p2"][1] #cur s2_dot
+        self.s2_ddot = 0.0
         self.has_acclerated2 =  lon_info_init["p2"][2]  #has p2 accelerated
         self.delta_t = delta_t
-        self.accumulated_cost = 0.0
+        self.accumulated_cost = cost
         self.fitted_lane_funcs = fitted_lane_funcs
 
 
@@ -156,24 +189,45 @@ class GameState:
             self.has_acclerated1 = True
         if self.has_acclerated2 == False and action["p2"] > 0:
             self.has_acclerated2 = True
+        self.s1_ddot = action["p1"]
+        self.s2_ddot = action["p2"]
+        # print("------before update--------")
+        # print("s1: ", self.s1, "s2: ", self.s2, "s1_dot: ", self.s1_dot, "s2_dot: ", self.s2_dot, "s1_ddot: ", action["p1"], "s2_ddot: ", action["p2"])
+        new_s1_dot = self.s1_dot + self.delta_t *  action["p1"]
+        if (new_s1_dot > self.s1_dot_max):
+            new_s1_dot = self.s1_dot_max
+        self.s1 = self.s1 + 0.5 * (new_s1_dot + self.s1_dot) * self.delta_t
+        self.s1_dot = new_s1_dot
+        new_s2_dot = self.s2_dot + self.delta_t *  action["p2"]
+        if (new_s2_dot > self.s2_dot_max):
+            new_s2_dot = self.s2_dot_max
+        self.s2 = self.s2 + 0.5 * (new_s2_dot + self.s2_dot) * self.delta_t
+        self.s2_dot = new_s2_dot
 
-        self.s1_dot = self.s1_dot + self.delta_t *  action["p1"]
-        if (self.s1_dot > self.s1_dot_max):
-            self.s1_dot = self.s1_dot_max
-        self.s1 = self.s1 + self.s1_dot * self.delta_t
-        self.s2_dot = self.s2_dot + self.delta_t *  action["p2"]
-        if (self.s2_dot > self.s2_dot_max):
-            self.s2_dot = self.s2_dot_max
-        self.s2 = self.s2 + self.s2_dot * self.delta_t
+        # print("------after update--------")
+        # print("s1: ", self.s1, "s2: ", self.s2, "s1_dot: ", self.s1_dot, "s2_dot: ", self.s2_dot)
+        track_vel_param = {
+            "v1_ref": 2.0,
+            "v1_weight": 1.0,
+            "v2_ref": 2.0,
+            "v2_weight": 1.0,
+            "max_acc": 1.0
+        }
 
-        self.accumulated_cost = self.accumulated_cost + collision_avoidance_objective(self.s1, self.s2, self.fitted_lane_funcs)
+
+       
 
         lon_info = {"p1": [self.s1, self.s1_dot, self.has_acclerated1],
                     "p2": [self.s2, self.s2_dot, self.has_acclerated2]}
         lon_max = {"p1": [self.s1_max, self.s1_dot_max],
                    "p2": [self.s2_max, self.s2_dot_max]
                    }
+        self.accumulated_cost = self.accumulated_cost + collision_avoidance_objective(self.s1, self.s2, self.fitted_lane_funcs) + proregss_objective_bounded(self.s1, self.s2, lon_max)
 
+        
+        # print("cost1: ", collision_avoidance_objective(self.s1, self.s2, self.fitted_lane_funcs))
+        # print("cost2: ", proregss_objective_bounded(self.s1, self.s2, lon_max))
+        # print("total_cost: ",  self.accumulated_cost)
         return GameState(lon_max, lon_info, self.accumulated_cost, self.fitted_lane_funcs)
     
     def is_terminal(self):
@@ -186,10 +240,6 @@ class GameState:
     #need to import lateral information in here, the polynomial functions
     def get_accumulated_cost(self):
         return self.accumulated_cost
-
-
-    def players_accelerated(self):
-        return [self.has_acclerated1,self.has_acclerated2]
 
 ##########################################################################
 #Numerical Optimization
@@ -249,6 +299,10 @@ def comfort_objective(s1_ddot, s2_ddot):
 
 def progress_objective(s1, s2):
     return -(s1[-1]**2 + s2[-1]**2)
+
+
+def proregss_objective_bounded(s1, s2, lon_max):
+    return (s1 - lon_max["p1"][0])**2 + (s2 - lon_max["p2"][0])**2
    
 
 def gradient(s, fitted_lane_funcs, fitted_lane_prime, track_vel_param, objective_weight):
@@ -519,7 +573,7 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
     s0[2 * single_order_var_len] = 0.0
     s0[2 * single_order_var_len + single_agent_var_len] = 0.0
 
-def construct_init_guess_via_search(t_max, delta_t, track_vel_param, s1_max, s2_max):
+def construct_init_guess_via_search(t_max, delta_t, lon_max, lon_info_init):
 
     pass
 
@@ -611,7 +665,7 @@ if __name__=="__main__":
     initial_state = GameState(lon_max, lon_info_init, 0.0, fitted_lane_funcs)
     mcts = MCTS(n_simulations=100)
     start_time = time.time()
-    best_next_state = mcts.search(initial_state)
+    ret_traj = mcts.search(initial_state)
     end_time = time.time()
     print("Searching time: ", end_time - start_time)
 
@@ -743,6 +797,13 @@ if __name__=="__main__":
     s2 = s2_var[0:single_order_var_len]
     s1_dot = s1_var[single_order_var_len:single_order_var_len*2]
     s2_dot = s2_var[single_order_var_len:single_order_var_len*2]
+    """
+
+    s1 = np.array(ret_traj["s1"])
+    s2 = np.array(ret_traj["s2"])
+
+    t_max = 10 #sec
+    delta_t = 1.0 #sec
 
     t = np.arange(0, t_max, delta_t)
 
@@ -790,7 +851,7 @@ if __name__=="__main__":
     # Show the plot
     plt.grid(True)
     plt.show()
-    """
+    
 
 
 
