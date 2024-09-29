@@ -6,7 +6,7 @@ class RefLine(object):
 		self.x = x
 		self.y = y
 		self.s = self.cur_accum_s()
-		self.param_x, self.param_y, self.s2x, self.s2y = fit_poly()
+		self.param_x, self.param_y, self.s2x, self.s2y = self.fit_poly()
 
 	def cur_accum_s(self):
 	    s = 0

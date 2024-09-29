@@ -137,8 +137,14 @@ class GameState:
     def __init__(self, lon_max, lon_info_init, cost, fitted_lane_funcs, delta_t = 1.0):
         self.s1_max = lon_max["p1"][0]#max s1
         self.s2_max = lon_max["p2"][0]#max s2
+
+        #self.s3_max = lon_max["p3"][0] #max_s3
+
         self.s1_dot_max = lon_max["p1"][1] #max s1_dot
         self.s2_dot_max = lon_max["p2"][1] #max s2_dot
+
+        #self.s3_dot_max = lon_max["p3"][1] #max s3_dot
+
         self.s1 = lon_info_init["p1"][0] #cur s1
         self.s1_dot = lon_info_init["p1"][1] #cur s1_dot
         self.s1_ddot = 0.0
@@ -565,12 +571,6 @@ def construct_init_guess_via_search(t_max, delta_t, lon_max, lon_info_init, init
     coarse_delta_t = init_ret["delta_t"]
     coarse_t_max = len(init_ret["s1"]) * coarse_delta_t
     t = np.arange(0, coarse_t_max, coarse_delta_t)
-    print('----------------------')
-    print(t)
-    print(init_ret["s1"])
-    print('----------------------')
-    print(lon_max["p1"][0])
-    print(lon_max["p2"][0])
 
     t2s1 = interp1d(t, init_ret["s1"], kind='linear', fill_value="extrapolate")
     t2s1_dot = interp1d(t, init_ret["s1_dot"], kind='linear', fill_value="extrapolate")
@@ -730,7 +730,6 @@ if __name__=="__main__":
 
     #s0_search = construct_init_guess(t_max, delta_t, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
     s0_search = construct_init_guess_via_search(t_max, delta_t, lon_max, lon_info_init, ret_traj)
-    print(s0_search)
     A, ug, lg = construct_linear_constraints(s0_search, delta_t)
     linear_constraints = LinearConstraint(A, lg, ug)
     ub, lb = construct_bounds(s0_search, track_vel_param, exp_accum_s[-1], line_accum_s[-1])
