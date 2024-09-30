@@ -9,19 +9,17 @@ import cmath
 import matplotlib.pyplot as plt
 
 
-def exp_function(x):
-    return -np.exp(-0.4*x) + 1
+# def exp_function(x):
+#     return -np.exp(-0.4*x) + 1
 
-def exp_function2(x):
-    return -np.exp(-0.4*(x-7)) + 1
+# def exp_function2(x):
+#     return -np.exp(-0.4*(x-7)) + 1
 
-def qudratic_function(x):
-    return -0.5*x**2 + 8
+# def qudratic_function(x):
+#     return -0.5*x**2 + 8
 
-def line(x):
-    return 1.0*np.ones(x.shape[0])
-
-
+# def line(x):
+#     return 1.0*np.ones(x.shape[0])
 
 
 def solve_quadratic(a, b, c):
@@ -51,7 +49,8 @@ def solve_quadratic(a, b, c):
     return [root1, root2]
 
 #output: success, speed_profile
-def SpeedProfileSampling(decision_combination, init_lon_info, horizon, ref_line_graph):
+def SpeedProfileSampling(decision_combination, init_lon_info, horizon, rl_graph, delta_t = 0.5):
+    ref_line_graph = rl_graph.ref_line_graph
     #define different maneuver parameters
     v_cruise = 2.00
     v_max = 4.00
@@ -60,8 +59,6 @@ def SpeedProfileSampling(decision_combination, init_lon_info, horizon, ref_line_
     acc_brake = -1.0
     d_safe = 2.0
     t_buffer = 2.0 #sec
-
-    delta_t = 0.1
 
     num_agents = len(decision_combination)
 
@@ -90,7 +87,9 @@ def SpeedProfileSampling(decision_combination, init_lon_info, horizon, ref_line_
                 cur_self_s = speed_profile[self_agent][0,i]# 0 for s, 1 for s_dot, 2 for s_ddot
                 cur_self_v = speed_profile[self_agent][1,i]
                 cur_neighbor_s = speed_profile[other_agent][0,i]
-                cur_neighbor_v = speed_profile[other_agent][1,i]                 
+                cur_neighbor_v = speed_profile[other_agent][1,i]  
+                cur_self_s_max = rl_graph.reflines[int(self_agent)].s[-1]  
+                cur_neighbor_s_max = rl_graph.reflines[int(other_agent)].s[-1]     
                 ref_line_info = {}
                 #retrieve ref_line_info 
                 for rlinfo in ref_line_graph[self_agent]:
@@ -159,6 +158,15 @@ def SpeedProfileSampling(decision_combination, init_lon_info, horizon, ref_line_
                     elif cur_self_s < s_min_self and cur_neighbor_s >= s_min_neighbor:
                         return False, speed_profile
 
+                    if (self_s >= cur_self_s_max):
+                        self_s = cur_self_s_max
+                        self_vel = 0.0
+                        self_acc = 0.0
+                    if (neighbor_s >= cur_neighbor_s_max - d_safe):
+                        neighbor_s = cur_neighbor_s_max - d_safe
+                        neighbor_vel = 0.0
+                        neighbor_acc = 0.0
+
                     if profile_updated[int(self_agent)] < 0.5:
                         speed_profile[self_agent][0,i+1] = self_s
                         speed_profile[self_agent][1,i+1] = self_vel
@@ -184,78 +192,82 @@ def SpeedProfileSampling(decision_combination, init_lon_info, horizon, ref_line_
 
     return True, speed_profile
 
-                 
-x_exp = np.linspace(-4, 24, 400)
-y_exp = exp_function(x_exp)
-x_exp2 = np.linspace(18, 3, 400)
-y_exp2 = exp_function2(x_exp2) 
+
+# x_exp = np.linspace(-4, 24, 400)
+# y_exp = exp_function(x_exp)
+# x_exp2 = np.linspace(18, 3, 400)
+# y_exp2 = exp_function2(x_exp2) 
 
 
-x_line = np.linspace(-6, 24, 400)
-y_line = line(x_line)
+# x_line = np.linspace(-6, 24, 400)
+# y_line = line(x_line)
 
-refline1 = RefLine(0, x_exp, y_exp)
-refline2 = RefLine(1, x_exp2, y_exp2)
-refline3 = RefLine(2, x_line, y_line)
+# refline1 = RefLine(0, x_exp, y_exp)
+# refline2 = RefLine(1, x_exp2, y_exp2)
+# refline3 = RefLine(2, x_line, y_line)
 
-ref_line_arr = [refline1, refline2, refline3]
+# ref_line_arr = [refline1, refline2, refline3]
 
-rl_graph = RefLineGraph(ref_line_arr)
-rl_graph.buildRefLineGraph()
-ref_line_graph = rl_graph.ref_line_graph
+# rl_graph = RefLineGraph(ref_line_arr)
+# rl_graph.buildRefLineGraph()
+# ref_line_graph = rl_graph.ref_line_graph
 
-consistent_combinations = rl_graph.generate_consistent_combinations()
+# consistent_combinations = rl_graph.generate_consistent_combinations()
 
-init_lon_info = {}
+# init_lon_info = {}
 
-for rl in ref_line_arr:
-    init_lon_info[rl.get_id()] = [0.1,0.0,0.0]
+# for rl in ref_line_arr:
+#     init_lon_info[rl.get_id()] = [0.1,0.0,0.0]
 
-horizon = 20
-
-for decision_combination in consistent_combinations:
-
-    ret, speed_profile = SpeedProfileSampling(decision_combination, init_lon_info, horizon, ref_line_graph)
-
-    if ret:
-        print(decision_combination)
-        plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['0'][0], 'r-',lw = 1.0, label='Player 0 s')
-        # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['0'][1], 'r-', label='Player 0 s_dot')
-        # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['0'][2], 'r-', label='Player 0 s_ddot')
-        # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['1'][0], 'g--', lw = 1.0, label='Player 1 s')
-        # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['1'][1], 'g--')
-        # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['1'][2], 'g.-')
-        plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['2'][0], 'm:', lw = 2.0, label='Player 2 s')
-        # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['2'][1], 'm--', label='Player 2 s_dot')
-        # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['2'][2], 'm--', label='Player 2 s_ddot')
-        plt.legend()
-        plt.show()
-        #print(speed_profile['1'][0:])
-        #print(speed_profile['2'][0:])
+# #init_lon_info['2'][0] = 6
 
 
 
+# horizon = 20
 
+# for decision_combination in consistent_combinations:
 
-# for idx, combination in enumerate(consistent_combinations):
-#     print(f"Combination {idx+1}:")
-#     for vehicle, decisions in combination.items():
-#         print(f"  {vehicle}: {decisions}")
-#     print()
+#     ret, speed_profile = SpeedProfileSampling(decision_combination, init_lon_info, horizon, ref_line_graph)
 
-# # Count total combinations
-# print(f"Total consistent combinations: {len(consistent_combinations)}")
+#     if ret:
+#         print(decision_combination)
+#         plt.plot(np.linspace(0,horizon, int(horizon/0.5)), speed_profile['0'][0], 'r-',lw = 1.0, label='Player 0 s')
+#         # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['0'][1], 'r-', label='Player 0 s_dot')
+#         # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['0'][2], 'r-', label='Player 0 s_ddot')
+#         plt.plot(np.linspace(0,horizon, int(horizon/0.5)), speed_profile['1'][0], 'g--', lw = 1.0, label='Player 1 s')
+#         # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['1'][1], 'g--')
+#         # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['1'][2], 'g.-')
+#         plt.plot(np.linspace(0,horizon, int(horizon/0.5)), speed_profile['2'][0], 'm:', lw = 2.0, label='Player 2 s')
+#         # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['2'][1], 'm--', label='Player 2 s_dot')
+#         # plt.plot(np.linspace(0,horizon, int(horizon/0.1)), speed_profile['2'][2], 'm--', label='Player 2 s_ddot')
+#         plt.legend()
+#         plt.show()
+#         #print(speed_profile['1'][0:])
+#         #print(speed_profile['2'][0:])
 
 
 
 
-# # Static background: road and buildings
-# road1 = plt.plot(x_exp, y_exp, 'r-', lw=1)
-# road2 = plt.plot(x_line, y_line, 'g-', lw=1)
-# road3 = plt.plot(x_exp2, y_exp2, 'b-', lw=1)
-# print(rl_graph.ref_line_graph["0"])
-# print(rl_graph.ref_line_graph["1"])
-# print(rl_graph.ref_line_graph["2"])
 
-# plt.axis('equal')
-# plt.show()
+# # for idx, combination in enumerate(consistent_combinations):
+# #     print(f"Combination {idx+1}:")
+# #     for vehicle, decisions in combination.items():
+# #         print(f"  {vehicle}: {decisions}")
+# #     print()
+
+# # # Count total combinations
+# # print(f"Total consistent combinations: {len(consistent_combinations)}")
+
+
+
+
+# # # Static background: road and buildings
+# # road1 = plt.plot(x_exp, y_exp, 'r-', lw=1)
+# # road2 = plt.plot(x_line, y_line, 'g-', lw=1)
+# # road3 = plt.plot(x_exp2, y_exp2, 'b-', lw=1)
+# # print(rl_graph.ref_line_graph["0"])
+# # print(rl_graph.ref_line_graph["1"])
+# # print(rl_graph.ref_line_graph["2"])
+
+# # plt.axis('equal')
+# # plt.show()

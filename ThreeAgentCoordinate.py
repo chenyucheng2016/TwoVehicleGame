@@ -1,384 +1,26 @@
 import numpy as np
-from scipy.optimize import minimize, LinearConstraint, Bounds
-#from cyipopt import minimize_ipopt
 from functools import partial
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from mpl_toolkits.mplot3d import Axes3D
 import time
 import math
 import random
 import copy
+from itertools import combinations
+
+#numerical opt package
+from scipy.optimize import minimize, LinearConstraint, Bounds
 from scipy.interpolate import interp1d
 
-##########################################################################
-#MCTS
-##########################################################################
-class Node:
-    def __init__(self, state, parent=None):
-        self.state = state
-        self.parent = parent
-        self.children = []
-        self.visits = 1e-6
-        self.value = 1e-6
-        self.average_value = -1
-        self.ave_val_change_rate = 1.0
+#custimized dependences
+from RefLine import RefLine
+from RefLineGraph import RefLineGraph
+from SpeedSampling import SpeedProfileSampling
 
-    def is_fully_expanded(self):
-        actions = self.state.get_legal_actions()
-        return len(self.children) == (len(actions["p1"]) * len(actions["p2"] * len(actions["p3"])))
-
-    def state_equal(self,state1,state2):
-        if  (abs(state1.s1 - state2.s1) < 1e-3 and 
-            abs(state1.s2 - state2.s2) < 1e-3 and 
-            abs(state1.s3 - state2.s3) < 1e-3 and
-            abs(state1.s1_dot - state2.s1_dot) < 1e-3 and 
-            abs(state1.s2_dot - state2.s2_dot) < 1e-3 and
-            abs(state1.s3_dot - state2.s3_dot) < 1e-3 and
-            abs(state1.s1_ddot - state2.s1_ddot) < 1e-3 and 
-            abs(state1.s2_ddot - state2.s2_ddot) < 1e-3 and
-            abs(state1.s3_ddot - state2.s3_ddot) < 1e-3):
-            return True
-        else:
-            return False
+#viz tools
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from mpl_toolkits.mplot3d import Axes3D
 
 
-
-    def best_child(self, c_param=1.4):
-        # for c in self.children:
-        #     print("exploration: ", math.sqrt((2 * math.log(self.visits) / c.visits)))
-        c_param = 1.0
-        choices_weights = [
-            (-child.value / child.visits) + c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
-            for child in self.children
-        ]
-        return self.children[choices_weights.index(max(choices_weights))]
-
-    def expand(self):
-        legal_actions = self.state.get_legal_actions()
-        actions4p1 = legal_actions["p1"]
-        actions4p2 = legal_actions["p2"]
-        actions4p3 = legal_actions["p3"]
-        p = False
-        for actionp1 in actions4p1:
-            for actionp2 in actions4p2:
-                for actionp3 in actions4p3:
-                    actions = {"p1": actionp1,
-                               "p2": actionp2,
-                               "p3": actionp3}
-                    # if not p:
-                    #     print("actions",actions)
-                    #     p = True
-                    state_copy = copy.deepcopy(self.state)
-                    new_state = state_copy.move(actions)
-                    new_state_exist = False
-                    for child in self.children:
-                        if self.state_equal(child.state, new_state):
-                            new_state_exist = True
-                            break
-                    if new_state_exist == False:
-                        child_node = Node(new_state, parent=self)
-                        self.children.append(child_node)
-                        return child_node
-
-    def backpropagate(self, reward):
-        self.visits += 1
-        self.value += reward
-        new_ave_val = self.value / self.visits
-        self.ave_val_change_rate = abs(new_ave_val - self.average_value) / abs(self.average_value)
-        self.average_value = new_ave_val
-        if self.parent:
-            self.parent.backpropagate(reward)
-
-    def best_action(self):
-        return self.best_child(c_param=1.4)
-
-class MCTS:
-    def __init__(self, n_simulations=100):
-        self.n_simulations = n_simulations
-
-    def search(self, initial_state):
-        root = Node(state=initial_state)
-        ret = {"delta_t": root.state.delta_t,
-               "s1": [root.state.s1],
-               "s1_dot": [root.state.s1_dot],
-               "s1_ddot": [root.state.s1_ddot],
-               "s2": [root.state.s2],
-               "s2_dot": [root.state.s2_dot],
-               "s2_ddot": [root.state.s2_ddot],
-               "s3": [root.state.s3],
-               "s3_dot": [root.state.s3_dot],
-               "s3_ddot": [root.state.s3_ddot],}
-        
-        while not root.state.is_terminal():
-            step = 0
-            while step < 1000:
-                node = self._select(root)
-                reward = self._simulate(copy.deepcopy(node.state))
-                print("sim reward: ", reward)
-                step = step + 1
-                node.backpropagate(reward)
-            
-
-            # print("child len", len(root.children))
-            # print("visits: ", root.visits)
-            # for c in root.children:
-            #     print("child visits: ", c.visits)
-            # first_child = root.children[0]
-            # print("first s1",first_child.state.s1)
-            # print("first s2",first_child.state.s2)
-            # print("first s3",first_child.state.s3)
-            # print("first s1_dot",first_child.state.s1_dot)
-            # print("first s2_dot",first_child.state.s2_dot)
-            # print("first s3_dot",first_child.state.s3_dot)
-            root = root.best_child()
-            # print("converged root val", root.average_value)
-            # print("\n")
-            ret["s1"].append(root.state.s1)
-            ret["s2"].append(root.state.s2)
-            ret["s3"].append(root.state.s3)
-            ret["s1_dot"].append(root.state.s1_dot)
-            ret["s2_dot"].append(root.state.s2_dot)
-            ret["s3_dot"].append(root.state.s3_dot)
-            ret["s1_ddot"].append(root.state.s1_ddot)
-            ret["s2_ddot"].append(root.state.s2_ddot)
-            ret["s3_ddot"].append(root.state.s3_ddot)
-
-        return ret
-
-    def _select(self, node):
-        while not node.state.is_terminal():
-            if not node.is_fully_expanded():
-                #print("in expand")
-                return node.expand()
-            else:
-                #print("best child")
-                node = node.best_child()
-        return node
-
-    def _simulate(self, state):#specfiy
-        current_state = state
-
-
-        actions  = {"p1": 0.0,
-                    "p2": 0.0,
-                    "p3": 0.0,
-                    }
-
-        if current_state.has_acclerated1 == False:
-            waiting_steps_p1 =  np.random.randint(current_state.allowed_waiting_time_p1)
-        else:
-            waiting_steps_p1 = -1
-
-        if current_state.has_acclerated2 == False:
-            waiting_steps_p2 =  np.random.randint(current_state.allowed_waiting_time_p2)
-        else:
-            waiting_steps_p2 = -1
-
-        if current_state.has_acclerated1 == False:
-            waiting_steps_p3 =  np.random.randint(current_state.allowed_waiting_time_p3)
-        else:
-            waiting_steps_p3 = -1
-
-        print("waiting_steps_p1: ", waiting_steps_p1)
-        print("waiting_steps_p2: ", waiting_steps_p2)
-        print("waiting_steps_p3: ", waiting_steps_p3)
-
-
-        step = 0
-        while not current_state.is_terminal():
-            if waiting_steps_p1 >= 0:
-                if step >= waiting_steps_p1:
-                    actions["p1"] = 0.5
-            else:
-                actions["p1"] = 0.5
-
-            if waiting_steps_p2 >= 0:
-                if step >= waiting_steps_p2:
-                    actions["p2"] = 0.5
-            else:
-                actions["p2"] = 0.5
-
-            if waiting_steps_p3 >= 0:
-                if step >= waiting_steps_p3:
-                    actions["p3"] = 0.5
-            else:
-                actions["p3"] = 0.5
-            
-            current_state = current_state.move(actions)
-            step += 1
-        return current_state.get_accumulated_cost()
-
-
-# Two Vehicle lon Game
-class GameState:
-    def __init__(self, lon_max, lon_info_init, cost, fitted_lane_funcs, delta_t = 1.0):
-        self.s1_max = lon_max["p1"][0]#max s1
-        self.s2_max = lon_max["p2"][0]#max s2
-        self.s3_max = lon_max["p3"][0] #max_s3
-
-        self.s1_dot_max = lon_max["p1"][1] #max s1_dot
-        self.s2_dot_max = lon_max["p2"][1] #max s2_dot
-        self.s3_dot_max = lon_max["p3"][1] #max s3_dot
-
-
-
-        self.s1 = lon_info_init["p1"][0] #cur s1
-        self.s1_dot = lon_info_init["p1"][1] #cur s1_dot
-        self.s1_ddot = lon_info_init["p1"][2]
-        self.has_acclerated1 =  lon_info_init["p1"][3] #has p1 accelerated
-
-        self.s2 = lon_info_init["p2"][0] #cur s2
-        self.s2_dot = lon_info_init["p2"][1] #cur s2_dot
-        self.s2_ddot = lon_info_init["p2"][2]
-        self.has_acclerated2 =  lon_info_init["p2"][3]  #has p2 accelerated
-
-
-        self.s3 = lon_info_init["p3"][0] #cur s2
-        self.s3_dot = lon_info_init["p3"][1] #cur s2_dot
-        self.s3_ddot = lon_info_init["p3"][2]
-        self.has_acclerated3 =  lon_info_init["p3"][3]  #has p2 accelerated
-
-
-        self.delta_t = delta_t
-        self.accumulated_cost = cost
-        self.fitted_lane_funcs = fitted_lane_funcs
-        self.lon_max = lon_max
-        self.t_max = 2.0 * (np.max([self.s1_max - self.s1, self.s2_max - self.s2, self.s3_max - self.s3]) / np.max([self.s1_dot_max,self.s2_dot_max,self.s3_dot_max]))
-        self.min_reach_time_p1 = (self.s1_max - self.s1) / self.s1_dot_max;
-        self.allowed_waiting_time_p1 = int((self.t_max - self.min_reach_time_p1) / self.delta_t)
-
-        self.min_reach_time_p2 = (self.s2_max - self.s2) / self.s2_dot_max;
-        self.allowed_waiting_time_p2 = int((self.t_max - self.min_reach_time_p2) / self.delta_t)
-
-        self.min_reach_time_p3 = (self.s3_max - self.s3) / self.s3_dot_max;
-        self.allowed_waiting_time_p3 = int((self.t_max - self.min_reach_time_p3) / self.delta_t)
-
-
-    def get_legal_actions(self):
-        # Return actions of two players, for each player 
-        # either apply 0 acc or a constant acc at each 
-        # time instant
-        # each action should be a dictionary
-        actions = {"p1": [],
-                   "p2": [],
-                   "p3": [],}
-        action_set1 = [0.0,0.5]
-        action_set2 = [0.5]
-        if self.has_acclerated1:
-            actions["p1"] = action_set2
-        else:
-            actions["p1"] = action_set1
-
-        if self.has_acclerated2:
-            actions["p2"] = action_set2
-        else:
-            actions["p2"] = action_set1
-
-        if self.has_acclerated3:
-            actions["p3"] = action_set2
-        else:
-            actions["p3"] = action_set1
-       
-        return actions
-    
-    
-    def move(self, action):
-        # Return the new state after applying the action
-        if self.has_acclerated1 == False and action["p1"] > 1e-3:
-            self.has_acclerated1 = True
-        if self.has_acclerated2 == False and action["p2"] > 1e-3:
-            self.has_acclerated2 = True
-        if self.has_acclerated3 == False and action["p3"] > 1e-3:
-            self.has_acclerated3 = True
-
-        new_s1_dot = self.s1_dot + self.delta_t *  0.5 * (self.s1_ddot + action["p1"])
-        self.s1_ddot = action["p1"]
-        if (new_s1_dot > self.s1_dot_max):
-            new_s1_dot = self.s1_dot_max
-        self.s1 = self.s1 + 0.5 * (new_s1_dot + self.s1_dot) * self.delta_t
-        if (self.s1 > self.s1_max):
-            self.s1 = self.s1_max
-        self.s1_dot = new_s1_dot
-
-        new_s2_dot = self.s2_dot + self.delta_t *  0.5 * (self.s2_ddot + action["p2"])
-        self.s2_ddot = action["p2"]
-        if (new_s2_dot > self.s2_dot_max):
-            new_s2_dot = self.s2_dot_max
-        self.s2 = self.s2 + 0.5 * (new_s2_dot + self.s2_dot) * self.delta_t
-        if (self.s2 > self.s2_max):
-            self.s2 = self.s2_max
-        self.s2_dot = new_s2_dot
-
-        new_s3_dot = self.s3_dot + self.delta_t *  0.5 * (self.s3_ddot + action["p3"])
-        self.s3_ddot = action["p3"]
-        if (new_s3_dot > self.s3_dot_max):
-            new_s3_dot = self.s3_dot_max
-        self.s3 = self.s3 + 0.5 * (new_s3_dot + self.s3_dot) * self.delta_t
-        if (self.s3 > self.s3_max):
-            self.s3 = self.s3_max
-        self.s3_dot = new_s3_dot
-
-
-        lon_info = {"p1": [self.s1, self.s1_dot, self.s1_ddot, self.has_acclerated1],
-                    "p2": [self.s2, self.s2_dot, self.s2_ddot, self.has_acclerated2],
-                    "p3": [self.s3, self.s3_dot, self.s3_ddot, self.has_acclerated3],
-                    }
-
-        ref_lines_12 = ["s2x_exp", "s2y_exp", "s2x_line", "s2y_line"]
-
-        ref_lines_23 = ["s2x_line", "s2y_line", "s2x_exp2", "s2y_exp2"]
-
-        ref_lines_13 = ["s2x_exp", "s2y_exp", "s2x_exp2", "s2y_exp2"]
-
-
-        collision_cost_p1_p2 = self.collision_avoidance_objective_specified_players(self.s1, self.s2, ref_lines_12)
-        collision_cost_p2_p3 = self.collision_avoidance_objective_specified_players(self.s2, self.s3, ref_lines_23)
-
- 
-        self.accumulated_cost = self.accumulated_cost + collision_cost_p1_p2 +  collision_cost_p2_p3
-                                                 
-
-        #print("collision p1 p2: ", collision_cost_p1_p2)
-        #print("collision p2 p3: ", collision_cost_p2_p3)
-
-
-         
-        return GameState(self.lon_max, lon_info, self.accumulated_cost, self.fitted_lane_funcs)
-    
-    def is_terminal(self):
-        # Return True if the state is terminal (end of game)
-        #------------------TODO: Add more conditions for termination check------------------------#
-        if self.s1 >= self.s1_max or (self.s2 >= self.s2_max and self.s3 >= self.s3_max):
-            return True
-        else:
-            return False
-    #need to import lateral information in here, the polynomial functions
-    def get_accumulated_cost(self):
-        return self.accumulated_cost# + self.progress_objective_bounded_specified_players()
-
-    def collision_avoidance_objective_specified_players(self, s1, s2, ref_lines):
-        x1 = self.fitted_lane_funcs[ref_lines[0]](s1)
-        y1 = self.fitted_lane_funcs[ref_lines[1]](s1)
-        x2 = self.fitted_lane_funcs[ref_lines[2]](s2)
-        y2 = self.fitted_lane_funcs[ref_lines[3]](s2)
-        dist = (x1 - x2)**2 + (y1 - y2)**2
-        #print("dist: ", np.sqrt(dist))
-        if np.sqrt(dist) >= 10.0:
-            return 0.0
-        elif np.sqrt(dist) < 1.0:
-            return np.exp(15)*20
-        else:
-            return np.exp(-np.sqrt(dist)+15)
-  
-
-    def progress_objective_bounded_specified_players(self):
-        return (self.s1 - self.lon_max["p1"][0])**2 + (self.s2 - self.lon_max["p2"][0])**2 + (self.s3 - self.lon_max["p3"][0])**2
-        
-
-###########################################
-#Env setup
-##########################################
 #reference line info
 def exp_function(x):
     return -np.exp(-0.4*x) + 1
@@ -423,6 +65,35 @@ def collision_avoidance_objective(s1, s2, fitted_lane_funcs):
     y2 = fitted_lane_funcs["s2y_line"](s2)
     dist = (x1 - x2)**2 + (y1 - y2)**2
     collision_avoidance_cost = np.exp(-dist + 15)
+    return collision_avoidance_cost
+
+def collision_avoidance_objective(s1, label1, s2, label2, fitted_lane_funcs):
+    if label1 == 'exp':
+        x1 = fitted_lane_funcs["s2x_exp"](s1)
+        y1 = fitted_lane_funcs["s2y_exp"](s1)
+    elif label1 == 'exp2':
+        x1 = fitted_lane_funcs["s2x_exp2"](s1)
+        y1 = fitted_lane_funcs["s2y_exp2"](s1)
+    elif label1 == 'line':
+        x1 = fitted_lane_funcs["s2x_line"](s1)
+        y1 = fitted_lane_funcs["s2y_line"](s1)
+
+    if label2 == 'exp':
+        x2 = fitted_lane_funcs["s2x_exp"](s2)
+        y2 = fitted_lane_funcs["s2y_exp"](s2)
+    elif label2 == 'exp2':
+        x2 = fitted_lane_funcs["s2x_exp2"](s2)
+        y2 = fitted_lane_funcs["s2y_exp2"](s2)
+    elif label2 == 'line':
+        x2 = fitted_lane_funcs["s2x_line"](s2)
+        y2 = fitted_lane_funcs["s2y_line"](s2)
+    # print('x1',x1)
+    # print('y1',y1)
+    # print('x2',x2)
+    # print('y2',y2)
+    dist = (x1 - x2)**2 + (y1 - y2)**2
+    collision_avoidance_cost = np.exp(-dist + 15)
+    print('dist list: ', np.sqrt(dist))
     return collision_avoidance_cost
     
 
@@ -716,37 +387,38 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
     return s0
 
 
-def construct_init_guess_via_search(t_max, delta_t, lon_max, lon_info_init, init_ret):
-    coarse_delta_t = init_ret["delta_t"]
-    coarse_t_max = len(init_ret["s1"]) * coarse_delta_t
-    t = np.arange(0, coarse_t_max, coarse_delta_t)
+def construct_init_via_sampling(consistent_combinations, init_lon_info, horizon, rl_graph, delta_t, track_vel_param, fitted_lane_funcs):
 
-    t2s1 = interp1d(t, init_ret["s1"], kind='linear', fill_value="extrapolate")
-    t2s1_dot = interp1d(t, init_ret["s1_dot"], kind='linear', fill_value="extrapolate")
-    t2s1_ddot = interp1d(t, init_ret["s1_ddot"], kind='linear', fill_value="extrapolate")
+    for decision_combination in consistent_combinations:
+        ret, speed_profile = SpeedProfileSampling(decision_combination, init_lon_info, horizon, rl_graph, delta_t)
+        if ret:
+            print(decision_combination)
+            agents = list(speed_profile.keys())
+            agent_pairs = list(combinations(agents,2))
+            total_cost = 0.0
+            for ap in agent_pairs:
+                labels = []
+                for e in ap:
+                    if e == '0':
+                        labels.append('exp')
+                    elif e == '1':
+                        labels.append('exp2')
+                    elif e == '2':
+                        labels.append('line')
+                total_cost = total_cost + np.sum(collision_avoidance_objective(speed_profile[ap[0]][0], labels[0], 
+                                              speed_profile[ap[1]][0], labels[1], fitted_lane_funcs))
+                print("-------------------")
+                print('label1: ', labels[0])
+                print('label2: ', labels[1])
+                print('single cost: ', total_cost)
+                print("-------------------")
+            print('######################')
+            print('total_cost: ', total_cost)
+            print('\n')
 
-    t2s2 = interp1d(t, init_ret["s2"], kind='linear', fill_value="extrapolate")
-    t2s2_dot = interp1d(t, init_ret["s2_dot"], kind='linear', fill_value="extrapolate")
-    t2s2_ddot = interp1d(t, init_ret["s2_ddot"], kind='linear', fill_value="extrapolate")
 
-    single_order_var_len = int(t_max / delta_t)
-    single_agent_var_len = 3 * single_order_var_len
-    var_len = single_agent_var_len * 2
 
-    s0 = np.zeros(var_len)
-    t_fill = np.linspace(0, t_max, single_order_var_len)
 
-    for i in range(single_order_var_len):
-        s0[i] = min(t2s1(t_fill[i]),lon_max["p1"][0])
-        s0[i + single_order_var_len] = t2s1_dot(t_fill[i])
-
-        s0[i + single_order_var_len * 2] =  0.5#track_vel_param["max_acc"]#t2s1_ddot(t_fill[i])
-
-        s0[i + single_agent_var_len] = min(t2s2(t_fill[i]),lon_max["p2"][0])
-        s0[i + single_order_var_len + single_agent_var_len] = t2s2_dot(t_fill[i])
-        s0[i + 2*single_order_var_len + single_agent_var_len] =  0.5#track_vel_param["max_acc"]#t2s2_ddot(t_fill[i])
-
-    return s0
 
 def callback(xk, fitted_lane_funcs, track_vel_param, objective_weight):
     print(f"Current solution: x = {xk}")
@@ -783,10 +455,8 @@ def update(t, s1, s2, s3, s2x_exp, s2y_exp, s2x_line, s2y_line, s2x_exp2, s2y_ex
     return car1, car2, car3
 
 if __name__=="__main__":
-    #Factors: s1_max, s2_max, delta_t, v1_weight, v2_weight
-    #how do you compenstate the non-convexity of collision function?
 
-    # Generate x values for plotting
+    # generate three paths
     x_exp = np.linspace(-4, 24, 400)
     y_exp = exp_function(x_exp)
 
@@ -797,6 +467,45 @@ if __name__=="__main__":
     x_line = np.linspace(-6, 24, 400)
     y_line = line(x_line)
 
+
+    #gene
+    refline1 = RefLine(0, x_exp, y_exp)
+    refline2 = RefLine(1, x_exp2, y_exp2)
+    refline3 = RefLine(2, x_line, y_line)
+
+    ref_line_arr = [refline1, refline2, refline3]
+
+    rl_graph = RefLineGraph(ref_line_arr)
+    rl_graph.buildRefLineGraph()
+
+    consistent_combinations = rl_graph.generate_consistent_combinations()
+
+    init_lon_info = {}
+
+    for rl in ref_line_arr:
+        init_lon_info[rl.get_id()] = [0.1,0.0,0.0]
+
+    horizon = 20
+
+    delta_t = 1.0
+
+
+    v1_ref = 2.0
+    v2_ref = 2.0
+
+    track_vel_param = {
+        "v1_ref": v1_ref,
+        "v1_weight": 1.0,
+        "v2_ref": v2_ref,
+        "v2_weight": 1.0,
+        "max_acc": 1.0
+    }
+
+    
+
+
+
+    
 
     exp_accum_s = cur_accum_s(x_exp, y_exp)
     line_accum_s = cur_accum_s(x_line, y_line)
@@ -843,7 +552,6 @@ if __name__=="__main__":
     s2y_exp2_dprime = np.poly1d(poly_derivative(poly_derivative(exp2_s2y_param)))#double prime
 
 
-
     fitted_lane_funcs = {
         "s2x_exp": s2x_exp,
         "s2y_exp": s2y_exp,
@@ -853,22 +561,17 @@ if __name__=="__main__":
         "s2y_line": s2y_line,
     }
 
+    init_lon_info['2'][0] = 0.0
+    construct_init_via_sampling(consistent_combinations, init_lon_info, horizon, rl_graph, delta_t, track_vel_param, fitted_lane_funcs)
+
+
+    """
+
     lon_max = {"p1": [exp_accum_s[-1], 2.0],
                "p2": [line_accum_s[-1], 2.0],
                "p3": [exp_accum_s2[-1], 2.0],
                }
-    print(lon_max)
-    lon_info_init = {"p1": [0.0, 0.0, 0.0, False],
-                     "p2": [10.0, 0.0, 0.0, False],
-                     "p3": [0.0, 0.0, 0.0, False],
-                     }
 
-    initial_state = GameState(lon_max, lon_info_init, 0.0, fitted_lane_funcs)
-    mcts = MCTS(n_simulations=100)
-    start_time = time.time()
-    ret_traj = mcts.search(initial_state)
-    end_time = time.time()
-    print("Searching time: ", end_time - start_time)
     
 
     fitted_lane_prime = {
@@ -882,16 +585,8 @@ if __name__=="__main__":
         "s2y_line_dprime": s2y_line_dprime,
     }
 
-    v1_ref = 2.0
-    v2_ref = 2.0
 
-    track_vel_param = {
-        "v1_ref": v1_ref,
-        "v1_weight": 1.0,
-        "v2_ref": v2_ref,
-        "v2_weight": 1.0,
-        "max_acc": 1.0
-    }
+  
 
     objective_weight = {
         "collision_weight":1.0,
@@ -1053,6 +748,7 @@ if __name__=="__main__":
     # # Show the plot
     # plt.grid(True)
     # plt.show()
+    """
     
 
 
