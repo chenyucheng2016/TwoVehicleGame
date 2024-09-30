@@ -93,7 +93,7 @@ def collision_avoidance_objective(s1, label1, s2, label2, fitted_lane_funcs):
     # print('y2',y2)
     dist = (x1 - x2)**2 + (y1 - y2)**2
     collision_avoidance_cost = np.exp(-dist + 15)
-    print('dist list: ', np.sqrt(dist))
+    #print('dist list: ', np.sqrt(dist))
     return collision_avoidance_cost
     
 
@@ -388,7 +388,6 @@ def construct_init_guess(t_max, delta_t, track_vel_param, s1_max, s2_max):
 
 
 def construct_init_via_sampling(consistent_combinations, init_lon_info, horizon, rl_graph, delta_t, track_vel_param, fitted_lane_funcs):
-
     for decision_combination in consistent_combinations:
         ret, speed_profile = SpeedProfileSampling(decision_combination, init_lon_info, horizon, rl_graph, delta_t)
         if ret:
@@ -407,14 +406,14 @@ def construct_init_via_sampling(consistent_combinations, init_lon_info, horizon,
                         labels.append('line')
                 total_cost = total_cost + np.sum(collision_avoidance_objective(speed_profile[ap[0]][0], labels[0], 
                                               speed_profile[ap[1]][0], labels[1], fitted_lane_funcs))
-                print("-------------------")
-                print('label1: ', labels[0])
-                print('label2: ', labels[1])
-                print('single cost: ', total_cost)
-                print("-------------------")
-            print('######################')
-            print('total_cost: ', total_cost)
-            print('\n')
+            #     print("-------------------")
+            #     print('label1: ', labels[0])
+            #     print('label2: ', labels[1])
+            #     print('single cost: ', total_cost)
+            #     print("-------------------")
+            # print('######################')
+            # print('total_cost: ', total_cost)
+            # print('\n')
 
 
 
@@ -561,7 +560,7 @@ if __name__=="__main__":
         "s2y_line": s2y_line,
     }
 
-    init_lon_info['2'][0] = 0.0
+    init_lon_info['2'][0] = 5.0
     construct_init_via_sampling(consistent_combinations, init_lon_info, horizon, rl_graph, delta_t, track_vel_param, fitted_lane_funcs)
 
 

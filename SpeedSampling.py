@@ -55,8 +55,6 @@ def SpeedProfileSampling(decision_combination, init_lon_info, horizon, rl_graph,
     v_cruise = 2.00
     v_max = 4.00
     acc_normal = 0.5
-    acc_overtake = 1.0
-    acc_brake = -1.0
     d_safe = 2.0
     t_buffer = 2.0 #sec
 
@@ -70,8 +68,8 @@ def SpeedProfileSampling(decision_combination, init_lon_info, horizon, rl_graph,
     for i in range(num_agents):
         speed_profile[str(i)] = np.zeros((3, num_steps))
         speed_profile[str(i)][0,0] = init_lon_info[str(i)][0]
-        speed_profile[str(i)][1,0] = init_lon_info[str(i)][0]
-        speed_profile[str(i)][2,0] = init_lon_info[str(i)][0]
+        speed_profile[str(i)][1,0] = init_lon_info[str(i)][1]
+        speed_profile[str(i)][2,0] = init_lon_info[str(i)][2]
 
 
     agents = list(decision_combination.keys())
@@ -134,6 +132,7 @@ def SpeedProfileSampling(decision_combination, init_lon_info, horizon, rl_graph,
                         if self_vel >= v_cruise:
                             self_vel = v_cruise
                         self_s = (self_vel + speed_profile[self_agent][1,i]) * 0.5 * delta_t + speed_profile[self_agent][0,i]
+                        
                     elif ((cur_self_s >= s_min_self and cur_neighbor_s < s_min_neighbor) or
                          (cur_self_s >= s_min_self and cur_neighbor_s >= s_min_neighbor)):
                         #both accelerate with normal acc, cruise if v = v_cruise
