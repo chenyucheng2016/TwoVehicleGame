@@ -25,3 +25,6 @@ class RefLine(object):
 		s2y = np.poly1d(param_y)
 		return param_x, param_y, s2x, s2y
 
+	def get_id(self):
+		return str(self.id_num)
+
